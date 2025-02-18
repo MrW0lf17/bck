@@ -1,6 +1,6 @@
 ﻿[build]
 builder = "nixpacks"
-buildCommand = "pip install -r requirements.txt"
+buildCommand = "python -m pip install --upgrade pip setuptools wheel ; pip install -r requirements.txt"
 
 [deploy]
 startCommand = "gunicorn app:app"
@@ -9,3 +9,4 @@ healthcheckTimeout = 100
 
 [env]
 PYTHON_VERSION = "3.11"
+NIXPACKS_PYTHON_VERSION = "3.11"
