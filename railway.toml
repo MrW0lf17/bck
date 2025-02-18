@@ -8,7 +8,7 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311", "python311Packages.pip", "python311Packages.setuptools", "python311Packages.wheel", "gcc", "binutils"]
 
 [env]
 PYTHON_VERSION = "3.11"
