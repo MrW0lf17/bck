@@ -1,16 +1,50 @@
 ﻿[build]
 builder = "nixpacks"
-buildCommand = "python3.11 -m pip install --upgrade pip setuptools wheel && python3.11 -m pip install -r requirements.txt"
+buildCommand = """
+apt-get update && \
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3.11-distutils \
+    python3.11-venv \
+    python3.11-pip \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    pkg-config \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/* && \
+python3.11 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+python3.11 -m pip install --no-cache-dir numpy==1.24.3 && \
+python3.11 -m pip install --no-cache-dir -r requirements.txt
+"""
 
 [deploy]
-startCommand = "python3.11 -m gunicorn app:app"
+startCommand = "python3.11 -m gunicorn --bind 0.0.0.0:$PORT app:app --timeout 120"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 
 [phases.setup]
-nixPkgs = ["python311", "python311Packages.pip", "python311Packages.setuptools", "python311Packages.wheel", "gcc", "binutils"]
+nixPkgs = [
+    "python311",
+    "python311Packages.pip",
+    "python311Packages.setuptools",
+    "python311Packages.wheel",
+    "gcc",
+    "binutils",
+    "pkg-config",
+    "postgresql",
+    "cmake",
+    "make"
+]
 
 [env]
 PYTHON_VERSION = "3.11"
 NIXPACKS_PYTHON_VERSION = "3.11"
 PIP_PREFER_BINARY = "1"
+PYTHONUNBUFFERED = "1"
+DEBIAN_FRONTEND = "noninteractive"
+LANG = "C.UTF-8"
+LC_ALL = "C.UTF-8"
+PORT = "8000"
