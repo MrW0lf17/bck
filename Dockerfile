@@ -3,7 +3,7 @@ FROM python:3.11.4-slim-bullseye
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && \
+RUN apt-get update ; \
     apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
@@ -14,12 +14,12 @@ RUN apt-get update && \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libxrender1 \
-    && rm -rf /var/lib/apt/lists/*
+    ; rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir gunicorn==21.2.0
+RUN pip install --no-cache-dir -r requirements.txt ; \
+    pip install --no-cache-dir gunicorn==21.2.0
 
 # Copy application code
 COPY . .
@@ -35,7 +35,7 @@ ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=info
 
 # Create necessary directories
-RUN mkdir -p debug_images && \
+RUN mkdir -p debug_images ; \
     chmod 777 debug_images
 
 # Expose port (this is just documentation)
@@ -52,7 +52,7 @@ exec gunicorn \
     --error-logfile - \
     --capture-output \
     --enable-stdio-inheritance \
-    "app:create_app()"' > /app/start.sh && \
+    "app:create_app()"' > /app/start.sh ; \
     chmod +x /app/start.sh
 
 # Run the application
