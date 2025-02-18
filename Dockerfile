@@ -25,13 +25,25 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    FLASK_APP=app.py \
+    FLASK_ENV=production \
+    GUNICORN_CMD_ARGS="--access-logfile=- --error-logfile=- --capture-output --enable-stdio-inheritance"
 
 # Create necessary directories
-RUN mkdir -p debug_images
+RUN mkdir -p debug_images && \
+    chmod 777 debug_images
 
 # Expose port (this is just documentation)
 EXPOSE 8000
 
-# Run the application
-CMD gunicorn --bind "0.0.0.0:$PORT" --timeout 120 --workers 4 --access-logfile - "app:create_app()" 
+# Run the application with proper error handling
+CMD gunicorn \
+    --bind "0.0.0.0:${PORT:-8000}" \
+    --timeout 120 \
+    --workers 4 \
+    --access-logfile - \
+    --error-logfile - \
+    --capture-output \
+    --enable-stdio-inheritance \
+    "app:create_app()" 
