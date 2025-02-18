@@ -1,6 +1,11 @@
 ﻿[build]
 builder = "nixpacks"
-buildCommand = "python -m pip install --upgrade pip setuptools wheel ; pip install --only-binary :all: numpy==1.24.3 ; pip install -r requirements.txt"
+buildCommand = """
+apt-get update && apt-get install -y python3.11-distutils python3.11-dev ;
+python -m pip install --upgrade pip setuptools wheel ;
+pip install --only-binary :all: numpy==1.24.3 Pillow==10.0.1 ;
+pip install -r requirements.txt
+"""
 
 [deploy]
 startCommand = "gunicorn app:app"
@@ -8,9 +13,20 @@ healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = [
+    "python311",
+    "python311Packages.pip",
+    "python311Packages.setuptools",
+    "python311Packages.wheel",
+    "gcc"
+]
+aptPkgs = [
+    "python3.11-distutils",
+    "python3.11-dev"
+]
 
 [env]
 PYTHON_VERSION = "3.11"
 NIXPACKS_PYTHON_VERSION = "3.11"
 PIP_PREFER_BINARY = "1"
+PYTHONPATH = "/nix/store/python311"
