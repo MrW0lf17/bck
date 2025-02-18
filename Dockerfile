@@ -27,8 +27,11 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Expose port
+# Create necessary directories
+RUN mkdir -p debug_images
+
+# Expose port (this is just documentation)
 EXPOSE 8000
 
 # Run the application
-CMD ["python3", "-m", "gunicorn", "--bind", "0.0.0.0:8000", "app:app", "--timeout", "120"] 
+CMD gunicorn --bind "0.0.0.0:$PORT" --timeout 120 --workers 4 --access-logfile - "app:create_app()" 

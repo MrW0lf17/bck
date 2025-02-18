@@ -3,9 +3,10 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3.11 -m gunicorn --bind 0.0.0.0:$PORT app:app --timeout 120"
 healthcheckPath = "/api/health"
-healthcheckTimeout = 100
+healthcheckTimeout = 180
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
 
 [env]
 PYTHON_VERSION = "3.11.4"
@@ -13,4 +14,3 @@ PYTHONUNBUFFERED = "1"
 DEBIAN_FRONTEND = "noninteractive"
 LANG = "C.UTF-8"
 LC_ALL = "C.UTF-8"
-PORT = "8000"
