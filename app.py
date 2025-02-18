@@ -2,48 +2,35 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
+import logging
 from werkzeug.middleware.proxy_fix import ProxyFix
 from routes.payments import payments
 from routes.webhooks import webhooks
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
 def create_app():
+    logger.info("Starting application initialization...")
     app = Flask(__name__)
+    
+    # Health check endpoint - define this first to ensure it's available
+    @app.route('/api/health')
+    def health_check():
+        return jsonify({"status": "healthy"}), 200
     
     # Configure CORS to allow requests from frontend and health checks
     CORS(app, resources={
         r"/*": {  # Allow all routes
-            "origins": [
-                "http://localhost:3000",  # Development
-                "http://localhost:3001",  # Alternative Development
-                "http://localhost:5173",  # Vite dev server
-                "http://127.0.0.1:3000",  # Alternative development
-                "http://127.0.0.1:3001",  # Alternative development
-                "http://127.0.0.1:5173",  # Alternative Vite dev server
-                os.getenv("FRONTEND_URL", ""),  # Production
-                "*"  # Allow health checks
-            ],
+            "origins": ["*"],  # Allow all origins for now
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept", "Stripe-Signature"],
-            "supports_credentials": True,
-            "expose_headers": ["Content-Type", "Authorization"]
         }
     })
-    
-    # Handle OPTIONS requests for all routes
-    @app.after_request
-    def after_request(response):
-        # Skip CORS for health check endpoint
-        if request.path == '/api/health':
-            return response
-            
-        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,Stripe-Signature')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        return response
     
     # Configure proxy settings for production
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -66,28 +53,16 @@ def create_app():
         app.register_blueprint(ai_bp, url_prefix='/api/ai')
         app.register_blueprint(payments)
         app.register_blueprint(webhooks)
+        logger.info("Successfully registered all blueprints")
     except Exception as e:
-        app.logger.error(f"Error during app initialization: {str(e)}")
+        logger.error(f"Error during app initialization: {str(e)}")
         # Continue anyway to allow health checks
-    
-    @app.route('/api/health')
-    def health_check():
-        try:
-            # Basic service checks
-            checks = {
-                "status": "healthy",
-                "supabase": bool(app.config.get('SUPABASE_URL')),
-                "redis": bool(app.config.get('REDIS_URL'))
-            }
-            return jsonify(checks), 200
-        except Exception as e:
-            app.logger.error(f"Health check error: {str(e)}")
-            return jsonify({"status": "healthy"}), 200  # Still return healthy to allow startup
     
     @app.route('/')
     def hello():
         return {'message': 'DiToolz Pro API is running!'}
     
+    logger.info("Application initialization completed")
     return app
 
 if __name__ == '__main__':
