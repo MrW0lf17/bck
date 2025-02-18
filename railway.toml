@@ -1,60 +1,14 @@
 ﻿[build]
-builder = "nixpacks"
-buildCommand = """
-export DEBIAN_FRONTEND=noninteractive && \
-apt-get update && \
-apt-get install -y software-properties-common && \
-add-apt-repository -y ppa:deadsnakes/ppa && \
-apt-get update && \
-apt-get install -y \
-    python3.11 \
-    python3.11-dev \
-    python3.11-distutils \
-    python3.11-venv \
-    python3.11-pip \
-    gcc-9 \
-    g++-9 \
-    make \
-    cmake \
-    pkg-config \
-    libpq-dev \
-    ffmpeg \
-    libsm6 \
-    libxext6 \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libxrender1 \
-    && rm -rf /var/lib/apt/lists/* && \
-update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9 && \
-python3.11 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-python3.11 -m pip install --no-cache-dir numpy==1.24.3 && \
-python3.11 -m pip install --no-cache-dir -r requirements.txt
-"""
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "python3.11 -m gunicorn --bind 0.0.0.0:$PORT app:app --timeout 120"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 100
 
-[phases.setup]
-nixPkgs = [
-    "python311",
-    "python311Packages.pip",
-    "python311Packages.setuptools",
-    "python311Packages.wheel",
-    "gcc9",
-    "binutils",
-    "pkg-config",
-    "postgresql",
-    "cmake",
-    "make",
-    "ffmpeg"
-]
-
 [env]
 PYTHON_VERSION = "3.11.4"
-NIXPACKS_PYTHON_VERSION = "3.11.4"
-PIP_PREFER_BINARY = "1"
 PYTHONUNBUFFERED = "1"
 DEBIAN_FRONTEND = "noninteractive"
 LANG = "C.UTF-8"
