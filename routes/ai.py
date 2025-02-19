@@ -217,19 +217,18 @@ def query_together_translation(text, to_lang='english'):
             "authorization": f"Bearer {TOGETHER_API_TOKEN}"
         }
         
-        # Simpler, more direct translation prompt
-        prompt = f"""Translate the following text to English. Return ONLY the English translation, nothing else:
-
-{text}"""
-
+        # Simple direct prompt for translation
         data = {
-            "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+            "model": "Qwen/Qwen2.5-72B-Instruct-Turbo",
             "messages": [
                 {
-                    "role": "system", 
-                    "content": "You are a translator. Translate the given text to English. Only return the translation."
+                    "role": "system",
+                    "content": "You are a translator. Translate any text to English. Only return the translation, nothing else."
                 },
-                {"role": "user", "content": prompt}
+                {
+                    "role": "user",
+                    "content": f"Translate this to English: {text}"
+                }
             ],
             "max_tokens": 1000,
             "temperature": 0.1,
@@ -264,13 +263,8 @@ def query_together_translation(text, to_lang='english'):
                 
             # Verify that the translation is different from the input and contains English characters
             if translated_text.lower() == text.lower() or not any(c.isascii() for c in translated_text):
-                # Try one more time with an even more forceful prompt
-                retry_prompt = """You MUST translate this text to English. Do not return the original text. 
-Only return the English translation, nothing else:
-
-{text}"""
-                
-                data["messages"][1]["content"] = retry_prompt
+                # Try one more time with a more forceful prompt
+                data["messages"][1]["content"] = f"Translate this text to English (do not return the original text): {text}"
                 retry_response = requests.post(
                     url="https://api.together.xyz/v1/chat/completions",
                     headers=headers,
@@ -287,6 +281,18 @@ Only return the English translation, nothing else:
                         
                         # Final verification
                         if translated_text.lower() == text.lower() or not any(c.isascii() for c in translated_text):
+                            # Try Google Translate as a fallback
+                            try:
+                                translator = GoogleTranslator(source='auto', target='en')
+                                translated_text = translator.translate(text)
+                                if translated_text and translated_text.lower() != text.lower():
+                                    return {
+                                        "translatedText": translated_text,
+                                        "to": "english",
+                                        "success": True
+                                    }
+                            except:
+                                pass
                             raise ValueError("Translation failed to produce English text")
                 else:
                     raise ValueError("Translation retry failed")
@@ -302,6 +308,18 @@ Only return the English translation, nothing else:
         
     except Exception as e:
         print(f"Translation error: {str(e)}")
+        # Try Google Translate as a last resort
+        try:
+            translator = GoogleTranslator(source='auto', target='en')
+            translated_text = translator.translate(text)
+            if translated_text and translated_text.lower() != text.lower():
+                return {
+                    "translatedText": translated_text,
+                    "to": "english",
+                    "success": True
+                }
+        except:
+            pass
         raise Exception(f"Translation failed: {str(e)}")
 
 @ai_bp.route('/detect-language', methods=['GET', 'POST', 'OPTIONS'])
