@@ -33,15 +33,14 @@ try:
         raise Exception("Missing Supabase configuration")
         
     print(f"Initializing Supabase client with URL: {supabase_url}")
-    supabase: Client = create_client(supabase_url, supabase_key)
+    supabase = create_client(supabase_url, supabase_key)
     
     # Test the connection
     test_response = supabase.table('generated_images').select('*').limit(1).execute()
     print("Supabase connection test successful")
-    
 except Exception as e:
     print(f"Error initializing Supabase client: {str(e)}")
-    raise Exception(f"Failed to initialize Supabase: {str(e)}")
+    supabase = None
 
 # Together.xyz API configuration
 TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN', 'afeff5873a8354f7088ce7a3fcbbf0b4aa879086c60104c66b73ebc0cbc7d27b')
