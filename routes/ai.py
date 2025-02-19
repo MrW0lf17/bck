@@ -211,16 +211,10 @@ def query_together_translation(text, to_lang='english'):
         if not text or not isinstance(text, str):
             raise ValueError("Invalid input text")
 
-        # Add delay to avoid rate limiting
-        time.sleep(5)
-
-        # Clean the API token
-        clean_token = TOGETHER_API_TOKEN.strip().replace('\n', '').replace('\r', '')
-        
         headers = {
             "accept": "application/json",
             "content-type": "application/json",
-            "authorization": f"Bearer {clean_token}"
+            "authorization": f"Bearer {TOGETHER_API_TOKEN}"
         }
         
         # Simple direct prompt for translation
@@ -432,9 +426,6 @@ def generate_image():
             }), 400
         
         try:
-            # Add delay if we recently made an API call
-            time.sleep(5)  # 5 second delay to avoid rate limiting
-            
             # Try to detect language, but don't fail if it doesn't work
             try:
                 detected_lang = detect(prompt)
@@ -443,56 +434,22 @@ def generate_image():
                 detected_lang = "en"
                 print("Language detection failed, defaulting to English")
             
-            # Clean the API token
-            clean_token = TOGETHER_API_TOKEN.strip().replace('\n', '').replace('\r', '')
-            
             # Generate image using Together.xyz
-            headers = {
-                "accept": "application/json",
-                "content-type": "application/json",
-                "authorization": f"Bearer {clean_token}"
-            }
+            image_base64 = query_together(prompt)
             
-            default_params = {
-                "model": "stabilityai/stable-diffusion-xl-base-1.0",
-                "prompt": prompt,
-                "steps": 30,
-                "n": 1,
-                "height": 1024,
-                "width": 1024,
-                "guidance": 7.5,
-                "output_format": "jpeg"
-            }
+            if not image_base64:
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to generate image"
+                }), 500
             
-            print(f"Making image generation request with prompt: {prompt}")
-            
-            response = requests.post(
-                TOGETHER_API_URL,
-                headers=headers,
-                json=default_params,
-                timeout=60
-            )
-            
-            if not response.ok:
-                print(f"Image generation API error: {response.status_code} - {response.text}")
-                raise ValueError(f"Image generation API error: {response.status_code}")
-                
-            result = response.json()
-            
-            if 'data' in result and len(result['data']) > 0 and 'url' in result['data'][0]:
-                image_url = result['data'][0]['url']
-                print(f"Got image URL: {image_url}")
-                
-                # Download the image
-                img_response = requests.get(image_url, timeout=30)
-                if not img_response.ok:
-                    raise Exception("Failed to download generated image")
-                
-                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            try:
+                # Convert base64 to bytes
                 image_data = base64.b64decode(image_base64)
                 
                 # Generate a unique filename with timestamp and sanitized prompt
                 timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                # Use the translated prompt for the filename
                 sanitized_prompt = ''.join(c if c.isalnum() else '_' for c in prompt[:50])
                 filename = f"generated_{timestamp}_{sanitized_prompt}_{uuid.uuid4()}.jpg"
                 
