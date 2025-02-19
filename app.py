@@ -36,29 +36,35 @@ def create_app():
     logger.info("Starting application initialization...")
     app = Flask(__name__)
     
-    # Configure CORS
+    # Configure CORS with all necessary origins
+    ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "https://diz-nine.vercel.app",
+        "https://bck-production-6927.up.railway.app"
+    ]
+    
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["http://localhost:5173", "https://diz-nine.vercel.app"],  # Allow both local and Vercel domains
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+            "origins": ALLOWED_ORIGINS,
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
             "expose_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": False,  # Disable credentials requirement
+            "supports_credentials": True,
             "max_age": 86400
         }
     })
     
     # Add CORS preflight handler
-    @app.before_request
-    def handle_preflight():
-        if request.method == "OPTIONS":
-            response = app.make_default_options_response()
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-ID, Accept, Origin"
-            response.headers["Access-Control-Max-Age"] = "86400"
-            response.headers["Access-Control-Allow-Credentials"] = "false"
-            return response
+    @app.after_request
+    def after_request(response):
+        origin = request.headers.get('Origin')
+        if origin in ALLOWED_ORIGINS:
+            response.headers.add('Access-Control-Allow-Origin', origin)
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-User-ID,Accept,Origin')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            response.headers.add('Access-Control-Max-Age', '86400')
+        return response
     
     # Register blueprints
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
