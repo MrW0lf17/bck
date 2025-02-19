@@ -218,18 +218,28 @@ def query_together_translation(text, to_lang='english'):
         }
         
         # Construct the translation prompt
-        prompt = f"""You are a professional translator. Detect the language of the following text and translate it to {to_lang}.
-Important rules:
+        prompt = f"""You are a professional translator specializing in precise translations. Detect the language of the following text and translate it to {to_lang}.
+
+Important rules for translation:
 1. First detect the language of the text
-2. Translate EXACTLY what is written, word for word
-3. For physical descriptions, be extremely precise:
-   - Colors should be translated literally
-   - Body parts and features should be translated exactly as written
-   - Clothing items should maintain their exact description
-4. Do not add or remove any details
-5. Do not interpret or paraphrase
-6. Maintain all descriptive adjectives exactly as they appear
-7. ONLY return the translation, no explanations or additional text
+2. Colors MUST be translated with their EXACT color names:
+   - For example: صورتی = pink (not fair, light, or any other approximation)
+   - Never change or approximate colors
+   - Maintain the exact shade/tone mentioned
+3. Descriptive terms must be translated literally:
+   - Translate each adjective exactly as written
+   - Maintain word order when possible
+   - Keep all descriptive details
+4. Physical descriptions must be precise:
+   - Body parts must be translated exactly
+   - Sizes and measurements must be kept exact
+   - Positions and arrangements must be preserved
+5. DO NOT:
+   - Add or remove any words
+   - Interpret or paraphrase
+   - Change the meaning or style
+   - Add explanations or notes
+6. ONLY return the direct translation, nothing else
 
 Text to translate:
 {text}"""
@@ -237,7 +247,7 @@ Text to translate:
         data = {
             "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "messages": [
-                {"role": "system", "content": "You are a professional translator. Only return the direct translation without any additional text or explanations."},
+                {"role": "system", "content": "You are a precise translator. Return ONLY the direct translation, maintaining exact colors and descriptions. No explanations or additional text."},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 1000,
