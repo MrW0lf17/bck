@@ -293,21 +293,33 @@ def detect_language():
         text = data.get('text')
         
         if not text:
-            return jsonify({"error": "No text provided"}), 400
+            return jsonify({
+                "language": "en",
+                "error": "No text provided, defaulting to English"
+            }), 200  # Return 200 instead of 400
             
         try:
             language = detect(text)
             return jsonify({"language": language}), 200
         except Exception as lang_error:
             print(f"Language detection error: {str(lang_error)}")
-            return jsonify({"language": "en", "error": "Language detection failed, defaulting to English"}), 200
+            return jsonify({
+                "language": "en",
+                "error": "Language detection failed, defaulting to English"
+            }), 200
         
     except Exception as e:
         print(f"Error in detect-language endpoint: {str(e)}")
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "language": "en",
+            "error": f"Error processing request: {str(e)}"
+        }), 200  # Return 200 instead of 400
 
-@ai_bp.route('/translate', methods=['POST'])
+@ai_bp.route('/translate', methods=['POST', 'OPTIONS'])
 def translate():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         data = request.get_json()
         text = data.get('text')
@@ -317,11 +329,26 @@ def translate():
         if not text:
             return jsonify({"error": "No text provided"}), 400
             
+        # First try to detect the language if from_lang is auto
+        if from_lang == 'auto':
+            try:
+                detected_lang = detect(text)
+                from_lang = detected_lang
+                print(f"Detected language: {detected_lang}")
+            except Exception as lang_error:
+                print(f"Language detection error: {str(lang_error)}")
+                from_lang = 'en'  # Default to English if detection fails
+        
         try:
             translation_result = query_together_translation(text, from_lang, to_lang)
             
             if not translation_result or not isinstance(translation_result, dict):
-                return jsonify({"error": "Invalid translation response"}), 500
+                return jsonify({
+                    "error": "Invalid translation response",
+                    "translatedText": text,  # Return original text as fallback
+                    "from": from_lang,
+                    "to": to_lang
+                }), 200  # Return 200 with original text instead of 500
                 
             return jsonify(translation_result), 200
             
@@ -332,11 +359,16 @@ def translate():
                 "translatedText": text,  # Return original text as fallback
                 "from": from_lang,
                 "to": to_lang
-            }), 500
+            }), 200  # Return 200 with original text instead of 500
             
     except Exception as e:
         print(f"Translation route error: {str(e)}")
-        return jsonify({"error": str(e)}), 400
+        return jsonify({
+            "error": str(e),
+            "translatedText": text if text else "",
+            "from": from_lang,
+            "to": to_lang
+        }), 200  # Return 200 with error details instead of 400
 
 @ai_bp.route('/generate', methods=['POST', 'OPTIONS'])
 @rate_limit()

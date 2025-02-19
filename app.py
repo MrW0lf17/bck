@@ -39,13 +39,25 @@ def create_app():
     # Configure CORS
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["https://diz-nine.vercel.app", "http://localhost:3000", "http://localhost:5173"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-User-ID"],
+            "origins": ["https://diz-nine.vercel.app", "http://localhost:3000", "http://localhost:5173", "*"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
             "expose_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True
+            "supports_credentials": True,
+            "max_age": 86400
         }
     })
+    
+    # Add CORS preflight handler
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-ID, Accept, Origin"
+            response.headers["Access-Control-Max-Age"] = "86400"
+            return response
     
     # Register blueprints
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
