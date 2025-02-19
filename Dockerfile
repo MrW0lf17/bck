@@ -14,6 +14,8 @@ RUN apt-get update ; \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libxrender1 \
+    python3-dev \
+    cmake \
     ; rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -30,9 +32,11 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_APP=app.py \
     FLASK_ENV=production \
     PORT=8000 \
-    GUNICORN_TIMEOUT=120 \
-    WORKERS=4 \
-    LOG_LEVEL=info
+    GUNICORN_TIMEOUT=300 \
+    WORKERS=2 \
+    LOG_LEVEL=info \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1
 
 # Create necessary directories
 RUN mkdir -p debug_images ; \

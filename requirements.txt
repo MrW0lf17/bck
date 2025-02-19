@@ -25,3 +25,4 @@ mediapipe==0.10.9
 rembg==2.0.60
 ffmpeg-python==0.2.0
 stripe==7.11.0
+onnxruntime==1.16.3
