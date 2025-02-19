@@ -39,7 +39,7 @@ def create_app():
     # Configure CORS
     CORS(app, resources={
         r"/api/*": {
-            "origins": "*",  # Allow all origins
+            "origins": ["http://localhost:5173", "https://diz-nine.vercel.app"],  # Allow both local and Vercel domains
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
             "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
             "expose_headers": ["Content-Type", "Authorization"],
@@ -53,7 +53,7 @@ def create_app():
     def handle_preflight():
         if request.method == "OPTIONS":
             response = app.make_default_options_response()
-            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-ID, Accept, Origin"
             response.headers["Access-Control-Max-Age"] = "86400"
