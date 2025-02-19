@@ -12,15 +12,13 @@ logger = logging.getLogger(__name__)
 
 def get_supabase_client():
     """Get a Supabase client instance with proper error handling."""
-    supabase_url = current_app.config.get('SUPABASE_URL') or os.getenv('SUPABASE_URL')
-    supabase_key = current_app.config.get('SUPABASE_KEY') or os.getenv('SUPABASE_KEY')
-    
-    if not supabase_url or not supabase_key:
-        error_msg = "Missing required Supabase configuration"
-        logger.error(f"{error_msg} - URL: {'Set' if supabase_url else 'Missing'}, Key: {'Set' if supabase_key else 'Missing'}")
-        raise ValueError(error_msg)
-    
     try:
+        supabase_url = current_app.config.get('SUPABASE_URL')
+        supabase_key = current_app.config.get('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise ValueError("Missing Supabase configuration in app config")
+            
         return create_client(supabase_url, supabase_key)
     except Exception as e:
         logger.error(f"Failed to create Supabase client: {str(e)}")

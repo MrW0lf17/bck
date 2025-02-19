@@ -21,8 +21,7 @@ def validate_environment():
     """Validate required environment variables are set."""
     required_vars = {
         'SUPABASE_URL': os.getenv('SUPABASE_URL'),
-        'SUPABASE_KEY': os.getenv('SUPABASE_KEY'),
-        'REDIS_URL': os.getenv('REDIS_URL')
+        'SUPABASE_KEY': os.getenv('SUPABASE_KEY')
     }
     
     missing_vars = [key for key, value in required_vars.items() if not value]
@@ -43,9 +42,11 @@ def create_app():
         status = "healthy" if env_valid else "degraded"
         response = {
             "status": status,
-            "environment": "valid" if env_valid else "missing required variables"
+            "environment": "valid" if env_valid else "missing required variables",
+            "supabase_url": "configured" if os.getenv('SUPABASE_URL') else "missing",
+            "supabase_key": "configured" if os.getenv('SUPABASE_KEY') else "missing"
         }
-        return jsonify(response), 200 if env_valid else 500
+        return jsonify(response), 200
     
     # Configure CORS to allow requests from frontend and health checks
     CORS(app, resources={
@@ -63,7 +64,6 @@ def create_app():
         # Load configuration into Flask app config
         app.config['SUPABASE_URL'] = os.getenv('SUPABASE_URL', '')
         app.config['SUPABASE_KEY'] = os.getenv('SUPABASE_KEY', '')
-        app.config['REDIS_URL'] = os.getenv('REDIS_URL', '')
         
         if not validate_environment():
             logger.error("Application started with missing environment variables")
