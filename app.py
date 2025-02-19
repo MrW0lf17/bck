@@ -36,34 +36,27 @@ def create_app():
     logger.info("Starting application initialization...")
     app = Flask(__name__)
     
-    # Configure CORS with all necessary origins
-    ALLOWED_ORIGINS = [
-        "http://localhost:5173",
-        "https://diz-nine.vercel.app",
-        "https://bck-production-6927.up.railway.app"
-    ]
-    
+    # Simple CORS configuration
     CORS(app, resources={
-        r"/api/*": {
-            "origins": ALLOWED_ORIGINS,
+        r"/*": {
+            "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
+            "allow_headers": "*",
             "expose_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "max_age": 86400
+            "supports_credentials": False,
+            "max_age": 600
         }
     })
     
-    # Add CORS preflight handler
+    # Global after request handler for CORS
     @app.after_request
     def after_request(response):
         origin = request.headers.get('Origin')
-        if origin in ALLOWED_ORIGINS:
-            response.headers.add('Access-Control-Allow-Origin', origin)
-            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-User-ID,Accept,Origin')
-            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-            response.headers.add('Access-Control-Allow-Credentials', 'true')
-            response.headers.add('Access-Control-Max-Age', '86400')
+        if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = '*'
+        response.headers['Access-Control-Max-Age'] = '600'
         return response
     
     # Register blueprints
