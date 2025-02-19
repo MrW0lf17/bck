@@ -218,36 +218,50 @@ def query_together_translation(text, to_lang='english'):
         }
         
         # Construct the translation prompt
-        prompt = f"""You are a professional translator specializing in precise translations. Detect the language of the following text and translate it to {to_lang}.
+        prompt = f"""You are a professional translator with expertise in multiple languages. Follow these steps precisely:
 
-Important rules for translation:
-1. First detect the language of the text
-2. Colors MUST be translated with their EXACT color names:
-   - For example: صورتی = pink (not fair, light, or any other approximation)
-   - Never change or approximate colors
-   - Maintain the exact shade/tone mentioned
-3. Descriptive terms must be translated literally:
-   - Translate each adjective exactly as written
-   - Maintain word order when possible
-   - Keep all descriptive details
-4. Physical descriptions must be precise:
-   - Body parts must be translated exactly
-   - Sizes and measurements must be kept exact
-   - Positions and arrangements must be preserved
-5. DO NOT:
-   - Add or remove any words
-   - Interpret or paraphrase
-   - Change the meaning or style
-   - Add explanations or notes
-6. ONLY return the direct translation, nothing else
+Step 1 - Language Detection:
+- First, carefully analyze and identify the source language of the text
+- Pay special attention to:
+  * Persian/Farsi (including dialectal variations)
+  * Arabic (including regional variations)
+  * Asian languages (Chinese, Japanese, Korean)
+  * European languages (including diacritics and special characters)
+
+Step 2 - Translation Rules:
+1. Translate the text word-by-word while maintaining natural grammar
+2. Preserve ALL specific details exactly as they appear:
+   * Colors must be translated with exact shades/tones
+   * Numbers must remain exactly as written
+   * Measurements must be kept in original units
+   * Names must remain unchanged
+   * Descriptive adjectives must maintain their exact intensity
+3. For physical descriptions:
+   * Body parts must be translated with anatomical precision
+   * Clothing items must maintain their exact style/type
+   * Sizes must be preserved exactly
+4. For artistic/creative descriptions:
+   * Maintain metaphors and similes exactly
+   * Preserve artistic terminology precisely
+   * Keep style-specific words in their exact form
+
+Step 3 - Quality Control:
+- Verify that NO information is lost or added
+- Ensure the translation captures the exact meaning
+- Maintain the original tone and style
 
 Text to translate:
-{text}"""
+{text}
+
+IMPORTANT: Return ONLY the direct translation. No explanations, no language detection notes, no additional text."""
 
         data = {
             "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "messages": [
-                {"role": "system", "content": "You are a precise translator. Return ONLY the direct translation, maintaining exact colors and descriptions. No explanations or additional text."},
+                {
+                    "role": "system", 
+                    "content": "You are a precise translator. Return only the exact translation, nothing else. No explanations, no notes, just the translation."
+                },
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 1000,
@@ -274,9 +288,8 @@ Text to translate:
             
         if 'choices' in response_data and len(response_data['choices']) > 0:
             translated_text = response_data['choices'][0]['message']['content'].strip()
-            # Remove any potential prefixes like "Translation:" or similar
+            # Clean up any potential prefixes or explanations
             translated_text = translated_text.replace("Translation:", "").strip()
-            # Take only the first line to avoid any explanations
             translated_text = translated_text.split('\n')[0].strip()
             
             if not translated_text:
@@ -284,11 +297,35 @@ Text to translate:
                 
             # Verify that the translation is different from the input
             if translated_text.lower() == text.lower():
-                raise ValueError("Translation returned same text as input")
+                # Try one more time with a more forceful prompt
+                retry_prompt = f"""Translate this text to {to_lang}. ONLY return the translation:
+
+{text}"""
+                
+                data["messages"][1]["content"] = retry_prompt
+                retry_response = requests.post(
+                    url="https://api.together.xyz/v1/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=30
+                )
+                
+                if retry_response.ok:
+                    retry_data = retry_response.json()
+                    if 'choices' in retry_data and len(retry_data['choices']) > 0:
+                        translated_text = retry_data['choices'][0]['message']['content'].strip()
+                        translated_text = translated_text.replace("Translation:", "").strip()
+                        translated_text = translated_text.split('\n')[0].strip()
+                        
+                        if translated_text.lower() == text.lower():
+                            raise ValueError("Translation returned same text as input after retry")
+                else:
+                    raise ValueError("Translation returned same text as input")
                 
             return {
                 "translatedText": translated_text,
-                "to": to_lang
+                "to": to_lang,
+                "success": True
             }
         else:
             print(f"Unexpected API response format: {response_data}")
