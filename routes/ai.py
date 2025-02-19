@@ -46,6 +46,7 @@ except Exception as e:
 TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN')
 if not TOGETHER_API_TOKEN:
     raise Exception("Missing TOGETHER_API_TOKEN environment variable")
+TOGETHER_API_TOKEN = TOGETHER_API_TOKEN.strip()  # Strip any whitespace or newlines
 TOGETHER_API_URL = "https://api.together.xyz/v1/images/generations"
 
 # Rate limiting configuration
