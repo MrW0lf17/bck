@@ -217,49 +217,17 @@ def query_together_translation(text, to_lang='english'):
             "authorization": f"Bearer {TOGETHER_API_TOKEN}"
         }
         
-        # Construct the translation prompt
-        prompt = f"""You are a professional translator specializing in translating any language to English. Follow these steps precisely:
+        # Simpler, more direct translation prompt
+        prompt = f"""Translate the following text to English. Return ONLY the English translation, nothing else:
 
-Step 1 - Language Detection:
-- Carefully identify the source language of the text
-- Pay special attention to:
-  * Persian/Farsi (including dialectal variations)
-  * Arabic (including regional variations)
-  * Asian languages (Chinese, Japanese, Korean)
-  * European languages (including diacritics and special characters)
-
-Step 2 - English Translation Rules:
-1. Translate to clear, natural English while preserving exact meaning
-2. Maintain these specific details:
-   * Colors with precise English color terms
-   * Numbers and measurements in their original form
-   * Names exactly as written
-   * Descriptive adjectives with accurate English equivalents
-3. For physical descriptions:
-   * Use precise English anatomical terms
-   * Translate clothing items to their closest English equivalents
-   * Keep measurements in original units
-4. For artistic/creative content:
-   * Convert metaphors to natural English expressions
-   * Use appropriate English artistic terminology
-   * Maintain the style in fluent English
-
-Step 3 - Quality Control:
-- Ensure the English translation is clear and natural
-- Verify all information is accurately preserved
-- Confirm the translation reads naturally to English speakers
-
-Text to translate:
-{text}
-
-IMPORTANT: Return ONLY the English translation. No explanations or additional text."""
+{text}"""
 
         data = {
             "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "messages": [
                 {
                     "role": "system", 
-                    "content": "You are a precise translator. Return only the exact translation, nothing else. No explanations, no notes, just the translation."
+                    "content": "You are a translator. Translate the given text to English. Only return the translation."
                 },
                 {"role": "user", "content": prompt}
             ],
@@ -269,7 +237,7 @@ IMPORTANT: Return ONLY the English translation. No explanations or additional te
             "context_length_exceeded_behavior": "error"
         }
         
-        print(f"Making translation request with data: {data}")
+        print(f"Making translation request for text: {text}")
         
         response = requests.post(
             url="https://api.together.xyz/v1/chat/completions",
@@ -294,10 +262,11 @@ IMPORTANT: Return ONLY the English translation. No explanations or additional te
             if not translated_text:
                 raise ValueError("Empty translation result")
                 
-            # Verify that the translation is different from the input
-            if translated_text.lower() == text.lower():
-                # Try one more time with a more forceful prompt
-                retry_prompt = f"""Translate this text to {to_lang}. ONLY return the translation:
+            # Verify that the translation is different from the input and contains English characters
+            if translated_text.lower() == text.lower() or not any(c.isascii() for c in translated_text):
+                # Try one more time with an even more forceful prompt
+                retry_prompt = """You MUST translate this text to English. Do not return the original text. 
+Only return the English translation, nothing else:
 
 {text}"""
                 
@@ -316,14 +285,15 @@ IMPORTANT: Return ONLY the English translation. No explanations or additional te
                         translated_text = translated_text.replace("Translation:", "").strip()
                         translated_text = translated_text.split('\n')[0].strip()
                         
-                        if translated_text.lower() == text.lower():
-                            raise ValueError("Translation returned same text as input after retry")
+                        # Final verification
+                        if translated_text.lower() == text.lower() or not any(c.isascii() for c in translated_text):
+                            raise ValueError("Translation failed to produce English text")
                 else:
-                    raise ValueError("Translation returned same text as input")
+                    raise ValueError("Translation retry failed")
                 
             return {
                 "translatedText": translated_text,
-                "to": to_lang,
+                "to": "english",
                 "success": True
             }
         else:
