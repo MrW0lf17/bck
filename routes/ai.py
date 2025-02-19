@@ -43,7 +43,7 @@ except Exception as e:
     supabase = None
 
 # Together.xyz API configuration
-TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN', 'afeff5873a8354f7088ce7a3fcbbf0b4aa879086c60104c66b73ebc0cbc7d27b')
+TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN', 'afeff5873a8354f7088ce7a3fcbbf0b4aa879086c60104c66b73ebc0cbc7d27b').strip()
 TOGETHER_API_URL = "https://api.together.xyz/v1/images/generations"
 
 # Rate limiting configuration
@@ -136,13 +136,13 @@ def query_together(prompt, params=None):
         print(f"Starting image generation with prompt: {prompt}")
         
         default_params = {
-            "model": "black-forest-labs/FLUX.1-schnell-Free",
+            "model": "stabilityai/stable-diffusion-xl-base-1.0",
             "prompt": prompt,
-            "steps": 4,
+            "steps": 30,
             "n": 1,
             "height": 1024,
             "width": 1024,
-            "guidance": 3.5,
+            "guidance": 7.5,
             "output_format": "jpeg"
         }
         
@@ -226,16 +226,15 @@ Important rules:
 3. Do not add or remove any details
 4. Do not interpret or paraphrase
 5. Maintain all descriptive adjectives exactly as they appear
+6. ONLY return the translation, no explanations or additional text
 
 Text to translate:
-{text}
-
-Provide ONLY the direct translation without any explanations or additional text."""
+{text}"""
 
         data = {
-            "model": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
             "messages": [
-                {"role": "system", "content": "You are a professional translator specializing in accurate and literal translations."},
+                {"role": "system", "content": "You are a professional translator. Only return the direct translation without any additional text or explanations."},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 1000,
@@ -269,6 +268,10 @@ Provide ONLY the direct translation without any explanations or additional text.
             
             if not translated_text:
                 raise ValueError("Empty translation result")
+                
+            # Verify that the translation is different from the input
+            if translated_text.lower() == text.lower():
+                raise ValueError("Translation returned same text as input")
                 
             return {
                 "translatedText": translated_text,
@@ -350,7 +353,26 @@ def translate():
                 print(f"Detected language: {detected_lang}")
             except Exception as lang_error:
                 print(f"Language detection error: {str(lang_error)}")
-                from_lang = 'en'  # Default to English if detection fails
+                # Try to detect using a different method if the first fails
+                try:
+                    # Use a simple character set check for non-Latin scripts
+                    if any('\u0600' <= char <= '\u06FF' for char in text):  # Arabic/Persian range
+                        from_lang = 'fa'  # Persian
+                    elif any('\u0900' <= char <= '\u097F' for char in text):  # Devanagari range
+                        from_lang = 'hi'  # Hindi
+                    else:
+                        from_lang = 'en'  # Default to English
+                except:
+                    from_lang = 'en'  # Default to English if all detection fails
+        
+        # Don't translate if source and target languages are the same
+        if from_lang == to_lang or (from_lang == 'en' and to_lang == 'english'):
+            return jsonify({
+                "translatedText": text,
+                "from": from_lang,
+                "to": to_lang,
+                "note": "Text already in target language"
+            }), 200
         
         try:
             translation_result = query_together_translation(text, from_lang, to_lang)
@@ -361,8 +383,18 @@ def translate():
                     "translatedText": text,  # Return original text as fallback
                     "from": from_lang,
                     "to": to_lang
-                }), 200  # Return 200 with original text instead of 500
+                }), 200
                 
+            # Verify the translation is not the same as the input
+            if translation_result['translatedText'].lower() == text.lower():
+                # Try one more time with explicit language detection
+                try:
+                    detected_lang = detect(text)
+                    if detected_lang != from_lang:
+                        translation_result = query_together_translation(text, detected_lang, to_lang)
+                except:
+                    pass
+            
             return jsonify(translation_result), 200
             
         except Exception as translation_error:
@@ -372,7 +404,7 @@ def translate():
                 "translatedText": text,  # Return original text as fallback
                 "from": from_lang,
                 "to": to_lang
-            }), 200  # Return 200 with original text instead of 500
+            }), 200
             
     except Exception as e:
         print(f"Translation route error: {str(e)}")
@@ -381,7 +413,7 @@ def translate():
             "translatedText": text if text else "",
             "from": from_lang,
             "to": to_lang
-        }), 200  # Return 200 with error details instead of 400
+        }), 200
 
 @ai_bp.route('/generate', methods=['POST', 'OPTIONS'])
 @rate_limit()
