@@ -283,8 +283,11 @@ Provide ONLY the direct translation without any explanations or additional text.
         print(f"Translation error: {str(e)}")
         raise Exception(f"Translation failed: {str(e)}")
 
-@ai_bp.route('/detect-language', methods=['POST'])
+@ai_bp.route('/detect-language', methods=['POST', 'OPTIONS'])
 def detect_language():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         data = request.get_json()
         text = data.get('text')
@@ -292,10 +295,15 @@ def detect_language():
         if not text:
             return jsonify({"error": "No text provided"}), 400
             
-        language = detect(text)
-        return jsonify({"language": language}), 200
+        try:
+            language = detect(text)
+            return jsonify({"language": language}), 200
+        except Exception as lang_error:
+            print(f"Language detection error: {str(lang_error)}")
+            return jsonify({"language": "en", "error": "Language detection failed, defaulting to English"}), 200
         
     except Exception as e:
+        print(f"Error in detect-language endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 400
 
 @ai_bp.route('/translate', methods=['POST'])
@@ -330,9 +338,12 @@ def translate():
         print(f"Translation route error: {str(e)}")
         return jsonify({"error": str(e)}), 400
 
-@ai_bp.route('/generate', methods=['POST'])
+@ai_bp.route('/generate', methods=['POST', 'OPTIONS'])
 @rate_limit()
 def generate_image():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         user_id = verify_auth_token()
         data = request.get_json()
@@ -343,170 +354,183 @@ def generate_image():
                 "success": False,
                 "error": "No prompt provided"
             }), 400
-            
-        # Generate image using Together.xyz
-        image_base64 = query_together(prompt)
         
-        if not image_base64:
+        try:
+            # Try to detect language, but don't fail if it doesn't work
+            try:
+                detected_lang = detect(prompt)
+                print(f"Detected language: {detected_lang}")
+            except:
+                detected_lang = "en"
+                print("Language detection failed, defaulting to English")
+            
+            # Generate image using Together.xyz
+            image_base64 = query_together(prompt)
+            
+            if not image_base64:
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to generate image"
+                }), 500
+            
+            try:
+                # Convert base64 to bytes
+                image_data = base64.b64decode(image_base64)
+                
+                # Generate a unique filename with timestamp and sanitized prompt
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                # Use the translated prompt for the filename
+                sanitized_prompt = ''.join(c if c.isalnum() else '_' for c in prompt[:50])
+                filename = f"generated_{timestamp}_{sanitized_prompt}_{uuid.uuid4()}.jpg"
+                
+                print(f"Attempting to save image with filename: {filename}")
+                
+                # Upload to Supabase Storage with retry logic
+                max_retries = 3
+                storage_success = False
+                public_url = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        print(f"Storage upload attempt {attempt + 1}")
+                        print(f"Uploading to bucket: generated-images, filename: {filename}")
+                        print(f"Image data size: {len(image_data)} bytes")
+                        
+                        storage_response = supabase.storage.from_('generated-images').upload(
+                            filename,
+                            image_data,
+                            {
+                                'content-type': 'image/jpeg',
+                                'cache-control': 'public, max-age=31536000'
+                            }
+                        )
+                        
+                        print(f"Storage response: {storage_response}")
+                        
+                        if storage_response:
+                            print(f"Successfully uploaded image on attempt {attempt + 1}")
+                            storage_success = True
+                            
+                            # Get public URL
+                            print("Getting public URL...")
+                            public_url_response = supabase.storage.from_('generated-images').get_public_url(filename)
+                            print(f"Public URL response: {public_url_response}")
+                            
+                            if isinstance(public_url_response, dict):
+                                public_url = public_url_response.get('publicUrl')
+                            else:
+                                public_url = public_url_response
+                                
+                            if not public_url:
+                                raise Exception("Failed to get public URL from response")
+                                
+                            print(f"Generated public URL: {public_url}")
+                            
+                            # Verify the image is accessible
+                            print("Verifying image accessibility...")
+                            verify_response = requests.head(public_url, timeout=10)
+                            print(f"Verify response status: {verify_response.status_code}")
+                            
+                            if not verify_response.ok:
+                                raise Exception(f"Uploaded image is not accessible: {verify_response.status_code}")
+                                
+                            print("Image URL verified as accessible")
+                            break
+                    except Exception as upload_error:
+                        print(f"Upload attempt {attempt + 1} failed with error: {str(upload_error)}")
+                        print(f"Error type: {type(upload_error)}")
+                        if hasattr(upload_error, 'response'):
+                            print(f"Response content: {upload_error.response.content}")
+                        if attempt == max_retries - 1:
+                            raise upload_error
+                        time.sleep(1)  # Wait before retrying
+                
+                if not storage_success or not public_url:
+                    raise Exception("Failed to upload image to storage")
+                
+                # Save metadata to database with retry logic
+                metadata = {
+                    'id': str(uuid.uuid4()),
+                    'prompt': prompt,  # Store the original prompt
+                    'image_url': public_url,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'user_id': user_id if user_id else None
+                }
+                
+                print(f"Attempting to save metadata to database: {metadata}")
+                
+                for attempt in range(max_retries):
+                    try:
+                        print(f"Database save attempt {attempt + 1}")
+                        
+                        # First, verify we can connect to the database
+                        test_query = supabase.table('generated_images').select('*').limit(1).execute()
+                        print("Database connection verified")
+                        
+                        # Attempt the insert
+                        db_response = supabase.table('generated_images').insert(metadata).execute()
+                        print(f"Database response: {db_response}")
+                        
+                        if not db_response:
+                            print("No response from database insert")
+                            raise Exception("No response from database insert")
+                            
+                        if not hasattr(db_response, 'data') or not db_response.data:
+                            print("No data in database response")
+                            raise Exception("No data in database response")
+                        
+                        saved_data = db_response.data[0]
+                        print(f"Successfully saved to database: {saved_data}")
+                        
+                        # Verify the save by fetching the record
+                        verify_response = supabase.table('generated_images').select('*').eq('id', metadata['id']).execute()
+                        if not verify_response or not verify_response.data or not verify_response.data[0]:
+                            print("Failed to verify saved data")
+                            print(f"Verify response: {verify_response}")
+                            raise Exception("Failed to verify saved data")
+                            
+                        print(f"Verified saved data: {verify_response.data[0]}")
+                        break
+                    except Exception as db_error:
+                        error_msg = str(db_error)
+                        print(f"Database save attempt {attempt + 1} failed with error: {error_msg}")
+                        
+                        if hasattr(db_error, 'response'):
+                            print(f"Error response: {db_error.response.text if hasattr(db_error.response, 'text') else db_error.response}")
+                        
+                        if attempt == max_retries - 1:
+                            raise Exception(f"Database save failed after {max_retries} attempts: {error_msg}")
+                        
+                        time.sleep(1)  # Wait before retrying
+                
+                return jsonify({
+                    "success": True,
+                    "message": "Image generated and saved successfully",
+                    "image_url": f"data:image/jpeg;base64,{image_base64}",  # For immediate display
+                    "stored_url": public_url,
+                    "metadata": metadata
+                }), 200
+                
+            except Exception as storage_error:
+                print(f"Storage/Database error: {str(storage_error)}")
+                # If storage/database fails, still return the base64 image
+                return jsonify({
+                    "success": True,
+                    "message": "Image generated but storage failed",
+                    "image_url": f"data:image/jpeg;base64,{image_base64}",
+                    "error_details": str(storage_error)
+                }), 200
+        
+        except Exception as e:
+            print(f"Error generating image: {str(e)}")
             return jsonify({
                 "success": False,
-                "error": "Failed to generate image"
+                "error": str(e)
             }), 500
-            
-        try:
-            # Convert base64 to bytes
-            image_data = base64.b64decode(image_base64)
-            
-            # Generate a unique filename with timestamp and sanitized prompt
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-            # Use the translated prompt for the filename
-            sanitized_prompt = ''.join(c if c.isalnum() else '_' for c in prompt[:50])
-            filename = f"generated_{timestamp}_{sanitized_prompt}_{uuid.uuid4()}.jpg"
-            
-            print(f"Attempting to save image with filename: {filename}")
-            
-            # Upload to Supabase Storage with retry logic
-            max_retries = 3
-            storage_success = False
-            public_url = None
-            
-            for attempt in range(max_retries):
-                try:
-                    print(f"Storage upload attempt {attempt + 1}")
-                    print(f"Uploading to bucket: generated-images, filename: {filename}")
-                    print(f"Image data size: {len(image_data)} bytes")
-                    
-                    storage_response = supabase.storage.from_('generated-images').upload(
-                        filename,
-                        image_data,
-                        {
-                            'content-type': 'image/jpeg',
-                            'cache-control': 'public, max-age=31536000'
-                        }
-                    )
-                    
-                    print(f"Storage response: {storage_response}")
-                    
-                    if storage_response:
-                        print(f"Successfully uploaded image on attempt {attempt + 1}")
-                        storage_success = True
-                        
-                        # Get public URL
-                        print("Getting public URL...")
-                        public_url_response = supabase.storage.from_('generated-images').get_public_url(filename)
-                        print(f"Public URL response: {public_url_response}")
-                        
-                        if isinstance(public_url_response, dict):
-                            public_url = public_url_response.get('publicUrl')
-                        else:
-                            public_url = public_url_response
-                            
-                        if not public_url:
-                            raise Exception("Failed to get public URL from response")
-                            
-                        print(f"Generated public URL: {public_url}")
-                        
-                        # Verify the image is accessible
-                        print("Verifying image accessibility...")
-                        verify_response = requests.head(public_url, timeout=10)
-                        print(f"Verify response status: {verify_response.status_code}")
-                        
-                        if not verify_response.ok:
-                            raise Exception(f"Uploaded image is not accessible: {verify_response.status_code}")
-                            
-                        print("Image URL verified as accessible")
-                        break
-                except Exception as upload_error:
-                    print(f"Upload attempt {attempt + 1} failed with error: {str(upload_error)}")
-                    print(f"Error type: {type(upload_error)}")
-                    if hasattr(upload_error, 'response'):
-                        print(f"Response content: {upload_error.response.content}")
-                    if attempt == max_retries - 1:
-                        raise upload_error
-                    time.sleep(1)  # Wait before retrying
-            
-            if not storage_success or not public_url:
-                raise Exception("Failed to upload image to storage")
-            
-            # Save metadata to database with retry logic
-            metadata = {
-                'id': str(uuid.uuid4()),
-                'prompt': prompt,  # Store the original prompt
-                'image_url': public_url,
-                'created_at': datetime.utcnow().isoformat(),
-                'user_id': user_id if user_id else None
-            }
-            
-            print(f"Attempting to save metadata to database: {metadata}")
-            
-            for attempt in range(max_retries):
-                try:
-                    print(f"Database save attempt {attempt + 1}")
-                    
-                    # First, verify we can connect to the database
-                    test_query = supabase.table('generated_images').select('*').limit(1).execute()
-                    print("Database connection verified")
-                    
-                    # Attempt the insert
-                    db_response = supabase.table('generated_images').insert(metadata).execute()
-                    print(f"Database response: {db_response}")
-                    
-                    if not db_response:
-                        print("No response from database insert")
-                        raise Exception("No response from database insert")
-                        
-                    if not hasattr(db_response, 'data') or not db_response.data:
-                        print("No data in database response")
-                        raise Exception("No data in database response")
-                    
-                    saved_data = db_response.data[0]
-                    print(f"Successfully saved to database: {saved_data}")
-                    
-                    # Verify the save by fetching the record
-                    verify_response = supabase.table('generated_images').select('*').eq('id', metadata['id']).execute()
-                    if not verify_response or not verify_response.data or not verify_response.data[0]:
-                        print("Failed to verify saved data")
-                        print(f"Verify response: {verify_response}")
-                        raise Exception("Failed to verify saved data")
-                        
-                    print(f"Verified saved data: {verify_response.data[0]}")
-                    break
-                except Exception as db_error:
-                    error_msg = str(db_error)
-                    print(f"Database save attempt {attempt + 1} failed with error: {error_msg}")
-                    
-                    if hasattr(db_error, 'response'):
-                        print(f"Error response: {db_error.response.text if hasattr(db_error.response, 'text') else db_error.response}")
-                    
-                    if attempt == max_retries - 1:
-                        raise Exception(f"Database save failed after {max_retries} attempts: {error_msg}")
-                    
-                    time.sleep(1)  # Wait before retrying
-            
-            return jsonify({
-                "success": True,
-                "message": "Image generated and saved successfully",
-                "image_url": f"data:image/jpeg;base64,{image_base64}",  # For immediate display
-                "stored_url": public_url,
-                "metadata": metadata
-            }), 200
-            
-        except Exception as storage_error:
-            print(f"Storage/Database error: {str(storage_error)}")
-            # If storage/database fails, still return the base64 image
-            return jsonify({
-                "success": True,
-                "message": "Image generated but storage failed",
-                "image_url": f"data:image/jpeg;base64,{image_base64}",
-                "error_details": str(storage_error)
-            }), 200
-        
+    
     except Exception as e:
-        print(f"Error generating image: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        print(f"Error in generate endpoint: {str(e)}")
+        return jsonify({"error": str(e)}), 400
 
 @ai_bp.route('/remove-background', methods=['POST'])
 def remove_background():

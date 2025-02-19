@@ -39,9 +39,11 @@ def create_app():
     # Configure CORS
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["https://diz-nine.vercel.app", "http://localhost:3000"],
+            "origins": ["https://diz-nine.vercel.app", "http://localhost:3000", "http://localhost:5173"],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"]
+            "allow_headers": ["Content-Type", "Authorization", "X-User-ID"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True
         }
     })
     
