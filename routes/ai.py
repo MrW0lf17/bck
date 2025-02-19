@@ -218,42 +218,41 @@ def query_together_translation(text, to_lang='english'):
         }
         
         # Construct the translation prompt
-        prompt = f"""You are a professional translator with expertise in multiple languages. Follow these steps precisely:
+        prompt = f"""You are a professional translator specializing in translating any language to English. Follow these steps precisely:
 
 Step 1 - Language Detection:
-- First, carefully analyze and identify the source language of the text
+- Carefully identify the source language of the text
 - Pay special attention to:
   * Persian/Farsi (including dialectal variations)
   * Arabic (including regional variations)
   * Asian languages (Chinese, Japanese, Korean)
   * European languages (including diacritics and special characters)
 
-Step 2 - Translation Rules:
-1. Translate the text word-by-word while maintaining natural grammar
-2. Preserve ALL specific details exactly as they appear:
-   * Colors must be translated with exact shades/tones
-   * Numbers must remain exactly as written
-   * Measurements must be kept in original units
-   * Names must remain unchanged
-   * Descriptive adjectives must maintain their exact intensity
+Step 2 - English Translation Rules:
+1. Translate to clear, natural English while preserving exact meaning
+2. Maintain these specific details:
+   * Colors with precise English color terms
+   * Numbers and measurements in their original form
+   * Names exactly as written
+   * Descriptive adjectives with accurate English equivalents
 3. For physical descriptions:
-   * Body parts must be translated with anatomical precision
-   * Clothing items must maintain their exact style/type
-   * Sizes must be preserved exactly
-4. For artistic/creative descriptions:
-   * Maintain metaphors and similes exactly
-   * Preserve artistic terminology precisely
-   * Keep style-specific words in their exact form
+   * Use precise English anatomical terms
+   * Translate clothing items to their closest English equivalents
+   * Keep measurements in original units
+4. For artistic/creative content:
+   * Convert metaphors to natural English expressions
+   * Use appropriate English artistic terminology
+   * Maintain the style in fluent English
 
 Step 3 - Quality Control:
-- Verify that NO information is lost or added
-- Ensure the translation captures the exact meaning
-- Maintain the original tone and style
+- Ensure the English translation is clear and natural
+- Verify all information is accurately preserved
+- Confirm the translation reads naturally to English speakers
 
 Text to translate:
 {text}
 
-IMPORTANT: Return ONLY the direct translation. No explanations, no language detection notes, no additional text."""
+IMPORTANT: Return ONLY the English translation. No explanations or additional text."""
 
         data = {
             "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
@@ -388,19 +387,19 @@ def translate():
     try:
         data = request.get_json()
         text = data.get('text')
-        to_lang = data.get('to', 'english')
         
         if not text:
             return jsonify({"error": "No text provided"}), 400
         
         try:
-            translation_result = query_together_translation(text, to_lang)
+            # Always translate to English
+            translation_result = query_together_translation(text, to_lang='english')
             
             if not translation_result or not isinstance(translation_result, dict):
                 return jsonify({
                     "error": "Invalid translation response",
                     "translatedText": text,  # Return original text as fallback
-                    "to": to_lang
+                    "to": "english"
                 }), 200
             
             return jsonify(translation_result), 200
@@ -410,7 +409,7 @@ def translate():
             return jsonify({
                 "error": f"Translation failed: {str(translation_error)}",
                 "translatedText": text,  # Return original text as fallback
-                "to": to_lang
+                "to": "english"
             }), 200
             
     except Exception as e:
@@ -418,7 +417,7 @@ def translate():
         return jsonify({
             "error": str(e),
             "translatedText": text if text else "",
-            "to": to_lang
+            "to": "english"
         }), 200
 
 @ai_bp.route('/generate', methods=['POST', 'OPTIONS'])
