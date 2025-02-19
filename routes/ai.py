@@ -283,28 +283,40 @@ Provide ONLY the direct translation without any explanations or additional text.
         print(f"Translation error: {str(e)}")
         raise Exception(f"Translation failed: {str(e)}")
 
-@ai_bp.route('/detect-language', methods=['POST', 'OPTIONS'])
+@ai_bp.route('/detect-language', methods=['GET', 'POST', 'OPTIONS'])
 def detect_language():
     if request.method == 'OPTIONS':
         return '', 204
         
     try:
-        data = request.get_json()
-        text = data.get('text')
-        
+        # Try to get text from either POST JSON data or GET query parameter
+        text = None
+        if request.method == 'POST':
+            data = request.get_json(silent=True)  # silent=True prevents error if JSON is invalid
+            if data:
+                text = data.get('text')
+        if not text and request.args:
+            text = request.args.get('text')
+            
         if not text:
             return jsonify({
                 "language": "en",
                 "error": "No text provided, defaulting to English"
-            }), 200  # Return 200 instead of 400
+            }), 200
             
         try:
             language = detect(text)
-            return jsonify({"language": language}), 200
+            return jsonify({
+                "language": language,
+                "text": text,
+                "success": True
+            }), 200
         except Exception as lang_error:
             print(f"Language detection error: {str(lang_error)}")
             return jsonify({
                 "language": "en",
+                "text": text,
+                "success": False,
                 "error": "Language detection failed, defaulting to English"
             }), 200
         
@@ -312,8 +324,9 @@ def detect_language():
         print(f"Error in detect-language endpoint: {str(e)}")
         return jsonify({
             "language": "en",
+            "success": False,
             "error": f"Error processing request: {str(e)}"
-        }), 200  # Return 200 instead of 400
+        }), 200
 
 @ai_bp.route('/translate', methods=['POST', 'OPTIONS'])
 def translate():
