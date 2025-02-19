@@ -8,11 +8,29 @@ from routes.payments import payments
 from routes.webhooks import webhooks
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+def validate_environment():
+    """Validate required environment variables are set."""
+    required_vars = {
+        'SUPABASE_URL': os.getenv('SUPABASE_URL'),
+        'SUPABASE_KEY': os.getenv('SUPABASE_KEY'),
+        'REDIS_URL': os.getenv('REDIS_URL')
+    }
+    
+    missing_vars = [key for key, value in required_vars.items() if not value]
+    
+    if missing_vars:
+        logger.warning(f"Missing environment variables: {', '.join(missing_vars)}")
+        return False
+    return True
 
 def create_app():
     logger.info("Starting application initialization...")
@@ -21,7 +39,13 @@ def create_app():
     # Health check endpoint - define this first to ensure it's available
     @app.route('/api/health')
     def health_check():
-        return jsonify({"status": "healthy"}), 200
+        env_valid = validate_environment()
+        status = "healthy" if env_valid else "degraded"
+        response = {
+            "status": status,
+            "environment": "valid" if env_valid else "missing required variables"
+        }
+        return jsonify(response), 200 if env_valid else 500
     
     # Configure CORS to allow requests from frontend and health checks
     CORS(app, resources={
@@ -36,12 +60,13 @@ def create_app():
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     
     try:
-        # Configure Supabase with defaults
+        # Load configuration into Flask app config
         app.config['SUPABASE_URL'] = os.getenv('SUPABASE_URL', '')
         app.config['SUPABASE_KEY'] = os.getenv('SUPABASE_KEY', '')
-        
-        # Configure Redis with default
         app.config['REDIS_URL'] = os.getenv('REDIS_URL', '')
+        
+        if not validate_environment():
+            logger.error("Application started with missing environment variables")
         
         # Register blueprints
         from routes.auth import auth_bp
