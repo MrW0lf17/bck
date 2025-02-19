@@ -43,7 +43,9 @@ except Exception as e:
     supabase = None
 
 # Together.xyz API configuration
-TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN', 'afeff5873a8354f7088ce7a3fcbbf0b4aa879086c60104c66b73ebc0cbc7d27b').strip()
+TOGETHER_API_TOKEN = os.getenv('TOGETHER_API_TOKEN')
+if not TOGETHER_API_TOKEN:
+    raise Exception("Missing TOGETHER_API_TOKEN environment variable")
 TOGETHER_API_URL = "https://api.together.xyz/v1/images/generations"
 
 # Rate limiting configuration
@@ -204,7 +206,7 @@ def query_together(prompt, params=None):
         print(f"Error in query_together: {str(e)}")
         raise Exception(f"Image generation failed: {str(e)}")
 
-def query_together_translation(text, from_lang='auto', to_lang='english'):
+def query_together_translation(text, to_lang='english'):
     try:
         if not text or not isinstance(text, str):
             raise ValueError("Invalid input text")
@@ -216,17 +218,18 @@ def query_together_translation(text, from_lang='auto', to_lang='english'):
         }
         
         # Construct the translation prompt
-        prompt = f"""You are a professional translator. Translate the following text from {from_lang} to {to_lang}.
+        prompt = f"""You are a professional translator. Detect the language of the following text and translate it to {to_lang}.
 Important rules:
-1. Translate EXACTLY what is written, word for word
-2. For physical descriptions, be extremely precise:
+1. First detect the language of the text
+2. Translate EXACTLY what is written, word for word
+3. For physical descriptions, be extremely precise:
    - Colors should be translated literally
    - Body parts and features should be translated exactly as written
    - Clothing items should maintain their exact description
-3. Do not add or remove any details
-4. Do not interpret or paraphrase
-5. Maintain all descriptive adjectives exactly as they appear
-6. ONLY return the translation, no explanations or additional text
+4. Do not add or remove any details
+5. Do not interpret or paraphrase
+6. Maintain all descriptive adjectives exactly as they appear
+7. ONLY return the translation, no explanations or additional text
 
 Text to translate:
 {text}"""
@@ -275,7 +278,6 @@ Text to translate:
                 
             return {
                 "translatedText": translated_text,
-                "from": from_lang,
                 "to": to_lang
             }
         else:
@@ -339,61 +341,20 @@ def translate():
     try:
         data = request.get_json()
         text = data.get('text')
-        from_lang = data.get('from', 'auto')
         to_lang = data.get('to', 'english')
         
         if not text:
             return jsonify({"error": "No text provided"}), 400
-            
-        # First try to detect the language if from_lang is auto
-        if from_lang == 'auto':
-            try:
-                detected_lang = detect(text)
-                from_lang = detected_lang
-                print(f"Detected language: {detected_lang}")
-            except Exception as lang_error:
-                print(f"Language detection error: {str(lang_error)}")
-                # Try to detect using a different method if the first fails
-                try:
-                    # Use a simple character set check for non-Latin scripts
-                    if any('\u0600' <= char <= '\u06FF' for char in text):  # Arabic/Persian range
-                        from_lang = 'fa'  # Persian
-                    elif any('\u0900' <= char <= '\u097F' for char in text):  # Devanagari range
-                        from_lang = 'hi'  # Hindi
-                    else:
-                        from_lang = 'en'  # Default to English
-                except:
-                    from_lang = 'en'  # Default to English if all detection fails
-        
-        # Don't translate if source and target languages are the same
-        if from_lang == to_lang or (from_lang == 'en' and to_lang == 'english'):
-            return jsonify({
-                "translatedText": text,
-                "from": from_lang,
-                "to": to_lang,
-                "note": "Text already in target language"
-            }), 200
         
         try:
-            translation_result = query_together_translation(text, from_lang, to_lang)
+            translation_result = query_together_translation(text, to_lang)
             
             if not translation_result or not isinstance(translation_result, dict):
                 return jsonify({
                     "error": "Invalid translation response",
                     "translatedText": text,  # Return original text as fallback
-                    "from": from_lang,
                     "to": to_lang
                 }), 200
-                
-            # Verify the translation is not the same as the input
-            if translation_result['translatedText'].lower() == text.lower():
-                # Try one more time with explicit language detection
-                try:
-                    detected_lang = detect(text)
-                    if detected_lang != from_lang:
-                        translation_result = query_together_translation(text, detected_lang, to_lang)
-                except:
-                    pass
             
             return jsonify(translation_result), 200
             
@@ -402,7 +363,6 @@ def translate():
             return jsonify({
                 "error": f"Translation failed: {str(translation_error)}",
                 "translatedText": text,  # Return original text as fallback
-                "from": from_lang,
                 "to": to_lang
             }), 200
             
@@ -411,7 +371,6 @@ def translate():
         return jsonify({
             "error": str(e),
             "translatedText": text if text else "",
-            "from": from_lang,
             "to": to_lang
         }), 200
 
