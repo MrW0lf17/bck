@@ -37,28 +37,44 @@ def create_app():
     app = Flask(__name__)
     
     # Configure CORS with all necessary headers
-    CORS(app, resources={
-        r"/*": {
-            "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
-            "expose_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "max_age": 600
+    CORS(app, 
+        resources={
+            r"/*": {
+                "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
+                "methods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin", "X-Requested-With"],
+                "expose_headers": ["Content-Type", "Authorization"],
+                "max_age": 600,
+                "supports_credentials": False
+            }
         }
-    })
+    )
     
-    # Global after request handler for CORS
+    # Global CORS headers for all responses
     @app.after_request
-    def after_request(response):
+    def add_cors_headers(response):
         origin = request.headers.get('Origin')
         if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
             response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin, X-Requested-With'
             response.headers['Access-Control-Max-Age'] = '600'
+            response.headers['Access-Control-Allow-Credentials'] = 'false'
         return response
+    
+    # Handle OPTIONS requests
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            origin = request.headers.get('Origin')
+            if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin, X-Requested-With'
+                response.headers['Access-Control-Max-Age'] = '600'
+                response.headers['Access-Control-Allow-Credentials'] = 'false'
+            return response
     
     # Register blueprints
     app.register_blueprint(ai_bp, url_prefix='/api/ai')
