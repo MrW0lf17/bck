@@ -614,18 +614,34 @@ def remove_background():
         if file.filename == '':
             return jsonify({"error": "No selected file"}), 400
             
-        # Read the input image
-        input_data = file.read()
-        
+        # Read and validate the input image
         try:
-            # Process image with rembg
-            output_data = remove(input_data)
+            input_bytes = file.read()
+            input_image = Image.open(BytesIO(input_bytes))
             
-            # Generate unique filename
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-            filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
+            # Convert to RGB if necessary
+            if input_image.mode in ('RGBA', 'LA'):
+                input_image = input_image.convert('RGB')
+                
+            # Convert back to bytes
+            input_buffer = BytesIO()
+            input_image.save(input_buffer, format='PNG')
+            input_bytes = input_buffer.getvalue()
+            
+            # Process image with rembg
+            print("Processing image with rembg...")
+            output_data = remove(input_bytes)
+            print("Image processing completed")
+            
+            # Convert to base64 first
+            image_base64 = base64.b64encode(output_data).decode('utf-8')
             
             try:
+                # Generate unique filename
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
+                
+                print(f"Uploading to Supabase storage: {filename}")
                 # Upload to Supabase Storage
                 storage_response = supabase.storage.from_('generated-images').upload(
                     filename,
@@ -638,17 +654,18 @@ def remove_background():
                 
                 # Get public URL
                 public_url = supabase.storage.from_('generated-images').get_public_url(filename)
+                print(f"Upload successful, public URL: {public_url}")
                 
                 return jsonify({
                     "success": True,
                     "message": "Background removed successfully",
-                    "processed_url": public_url
+                    "processed_url": public_url,
+                    "image_data": f"data:image/png;base64,{image_base64}"
                 }), 200
                 
             except Exception as storage_error:
                 print(f"Storage error: {str(storage_error)}")
                 # If storage fails, return the processed image as base64
-                image_base64 = base64.b64encode(output_data).decode('utf-8')
                 return jsonify({
                     "success": True,
                     "message": "Background removed but storage failed",
