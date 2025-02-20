@@ -882,9 +882,9 @@ def enhance_image():
         # Get image and settings from request
         image_data = data.get('image')
         settings = data.get('settings', {
-            'enhance_level': 'medium',  # low, medium, high
-            'style': 'natural',  # natural, vibrant, artistic
-            'focus': 'overall'  # overall, details, colors
+            'enhance_level': 'medium',
+            'style': 'natural',
+            'focus': 'overall'
         })
         
         if not image_data:
@@ -897,34 +897,40 @@ def enhance_image():
         if image_data.startswith('data:image'):
             image_data = image_data.split(',')[1]
 
-        # Build the enhancement parameters based on settings
-        enhance_level_params = {
-            'low': {'guidance': 2.5, 'steps': 10},
-            'medium': {'guidance': 3.5, 'steps': 15},
-            'high': {'guidance': 4.5, 'steps': 20}
-        }
+        # Convert base64 to image for processing
+        try:
+            image_bytes = base64.b64decode(image_data)
+            img = Image.open(BytesIO(image_bytes))
+            
+            # Convert to RGB if necessary
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize if too large (max 1024x1024)
+            max_size = 1024
+            if img.width > max_size or img.height > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+            # Convert back to base64
+            buffered = BytesIO()
+            img.save(buffered, format="JPEG", quality=95)
+            image_data = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        except Exception as img_error:
+            print(f"Image processing error: {str(img_error)}")
+            return jsonify({
+                "success": False,
+                "error": f"Image processing failed: {str(img_error)}"
+            }), 400
 
-        style_params = {
-            'natural': {'model': 'stabilityai/sdxl-turbo'},
-            'vibrant': {'model': 'stabilityai/stable-diffusion-xl-base-1.0'},
-            'artistic': {'model': 'runwayml/stable-diffusion-v1-5'}
-        }
-
-        # Get parameters based on settings
-        params = enhance_level_params[settings['enhance_level']]
-        model = style_params[settings['style']]['model']
-
-        # Prepare the API request for image-to-image enhancement
+        # Prepare the API request
         payload = {
-            "model": model,
-            "prompt": "enhance this image, maintain original content and composition",
-            "negative_prompt": "blur, pixelated, low quality, distorted",
+            "model": "stabilityai/stable-diffusion-xl-base-1.0",
+            "prompt": "enhance this photo, same composition, improve quality",
+            "negative_prompt": "blur, pixelated, low quality, distorted, different composition",
             "image": image_data,
-            "steps": params['steps'],
-            "guidance": params['guidance'],
-            "seed": 42,  # Fixed seed for consistency
-            "scheduler": "EulerAncestralDiscrete",
-            "output_format": "jpeg"
+            "num_inference_steps": 20,
+            "guidance_scale": 7.5,
+            "strength": 0.3,  # Lower strength to maintain more of original image
         }
         
         headers = {
@@ -934,38 +940,62 @@ def enhance_image():
         }
 
         try:
-            # Make the API request
+            print("Making API request to Together.xyz...")
             response = requests.post(
-                "https://api.together.xyz/v1/images/edit",  # Using the image edit endpoint
+                "https://api.together.xyz/v1/images/stable-diffusion/img2img",
                 json=payload,
-                headers=headers
+                headers=headers,
+                timeout=30
             )
             
+            print(f"API Response Status: {response.status_code}")
+            print(f"API Response Headers: {response.headers}")
+            
             if not response.ok:
-                print(f"API error response: {response.text}")
-                raise Exception(f"API request failed with status {response.status_code}")
+                error_detail = response.text
+                print(f"API error response: {error_detail}")
+                return jsonify({
+                    "success": False,
+                    "error": f"API request failed: {error_detail}"
+                }), response.status_code
 
             response_data = response.json()
-            print(f"API response: {response_data}")  # Debug log
+            print("API response received successfully")
 
-            if 'output' in response_data and response_data['output']:
-                enhanced_image_base64 = response_data['output'][0]
+            if 'images' in response_data and response_data['images']:
+                enhanced_image_base64 = response_data['images'][0]
                 return jsonify({
                     "success": True,
                     "result": f"data:image/jpeg;base64,{enhanced_image_base64}"
                 }), 200
             else:
-                raise Exception("No enhanced image in API response")
+                print(f"Unexpected API response format: {response_data}")
+                return jsonify({
+                    "success": False,
+                    "error": "No enhanced image in API response"
+                }), 500
             
+        except requests.exceptions.Timeout:
+            print("API request timed out")
+            return jsonify({
+                "success": False,
+                "error": "Enhancement request timed out"
+            }), 504
+        except requests.exceptions.RequestException as api_error:
+            print(f"API request error: {str(api_error)}")
+            return jsonify({
+                "success": False,
+                "error": f"Enhancement request failed: {str(api_error)}"
+            }), 500
         except Exception as api_error:
-            print(f"API error: {str(api_error)}")
+            print(f"Unexpected API error: {str(api_error)}")
             return jsonify({
                 "success": False,
                 "error": f"Enhancement failed: {str(api_error)}"
             }), 500
         
     except Exception as e:
-        print(f"General error: {str(e)}")
+        print(f"General error in enhance_image: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e)
