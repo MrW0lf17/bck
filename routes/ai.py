@@ -222,7 +222,7 @@ def query_together(prompt, params=None):
         default_params = {
             "model": model,
             "prompt": prompt,
-            "steps": steps,
+            "steps": steps,  # Fixed: Using the correct steps value
             "n": 1,
             "height": 768,  # Standard size from docs
             "width": 1024,  # Standard size from docs
@@ -255,65 +255,62 @@ def query_together(prompt, params=None):
             "authorization": f"Bearer {TOGETHER_API_TOKEN}"
         }
         
-        try:
-            response = make_api_request_with_retries(
-                TOGETHER_API_URL,
-                headers=headers,
-                data=default_params,
-                timeout=60
-            )
-            
-            print(f"Response status: {response.status_code}")
-            result = response.json()
-            print(f"API Response: {json.dumps(result, indent=2)}")  # Log full response for debugging
-            
-            if not response.ok:
-                error_msg = result.get('error', {}).get('message', str(result))
-                print(f"API Error: {error_msg}")
-                raise Exception(f"API Error: {error_msg}")
-            
-            if 'data' not in result or not result['data']:
-                raise Exception("No data in API response")
+        # Add retry logic specifically for rate limit errors
+        max_retries = 3
+        base_wait_time = 5  # Start with 5 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    wait_time = base_wait_time * (2 ** (attempt - 1))  # Exponential backoff
+                    print(f"Rate limit hit. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}...")
+                    time.sleep(wait_time)
                 
-            if not isinstance(result['data'], list) or not result['data']:
-                raise Exception("Invalid data format in API response")
+                response = make_api_request_with_retries(
+                    TOGETHER_API_URL,
+                    headers=headers,
+                    data=default_params,
+                    timeout=60
+                )
                 
-            if 'url' not in result['data'][0]:
-                raise Exception("No image URL in API response")
+                print(f"Response status: {response.status_code}")
+                result = response.json()
+                print(f"API Response: {json.dumps(result, indent=2)}")
                 
-            image_url = result['data'][0]['url']
-            print(f"Got image URL: {image_url}")
-            
-            # Download the image with retry logic
-            img_response = None
-            for config in [
-                {"verify": True, "proxies": None},
-                {"verify": False, "proxies": None},
-                {"verify": True, "proxies": {}},
-                {"verify": False, "proxies": {}}
-            ]:
-                try:
-                    img_response = requests.get(
-                        image_url,
-                        timeout=30,
-                        **config
-                    )
-                    if img_response.ok:
-                        break
-                except Exception as e:
-                    print(f"Image download attempt failed with config {config}: {str(e)}")
+                if response.ok:
+                    if 'data' not in result or not result['data']:
+                        raise Exception("No data in API response")
+                        
+                    if not isinstance(result['data'], list) or not result['data']:
+                        raise Exception("Invalid data format in API response")
+                        
+                    if 'url' not in result['data'][0]:
+                        raise Exception("No image URL in API response")
+                        
+                    image_url = result['data'][0]['url']
+                    print(f"Got image URL: {image_url}")
+                    
+                    # Download the image
+                    img_response = requests.get(image_url, timeout=30)
+                    if not img_response.ok:
+                        raise Exception("Failed to download generated image")
+                    
+                    image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                    return image_base64
+                
+                elif response.status_code == 429:
+                    if attempt == max_retries - 1:
+                        raise Exception("API rate limit exceeded. Please try again in a few minutes.")
                     continue
-            
-            if not img_response or not img_response.ok:
-                raise Exception("Failed to download generated image after all attempts")
-            
-            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-            return image_base64
-            
-        except Exception as api_error:
-            print(f"API Error in query_together: {str(api_error)}")
-            raise Exception(f"API Error: {str(api_error)}")
-            
+                else:
+                    error_msg = result.get('error', {}).get('message', str(result))
+                    raise Exception(f"API Error: {error_msg}")
+                
+            except Exception as e:
+                if "rate limit" in str(e).lower() and attempt < max_retries - 1:
+                    continue
+                raise e
+                
     except Exception as e:
         print(f"Error in query_together: {str(e)}")
         raise Exception(f"Image generation failed: {str(e)}")
