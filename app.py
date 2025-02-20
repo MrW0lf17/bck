@@ -36,25 +36,32 @@ def create_app():
     logger.info("Starting application initialization...")
     app = Flask(__name__)
     
-    # Configure CORS - Allow all origins temporarily for debugging
-    CORS(app, resources={
-        r"/*": {
-            "origins": "*",
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
-            "expose_headers": ["Content-Type", "Authorization"],
-            "max_age": 600
+    # Configure CORS
+    CORS(app, 
+        resources={
+            r"/api/*": {
+                "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
+                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization", "Accept"],
+                "expose_headers": ["Content-Type"],
+                "supports_credentials": False,
+                "max_age": 600,
+                "send_wildcard": False
+            }
         }
-    })
+    )
     
     # Global after request handler for CORS
     @app.after_request
     def after_request(response):
+        if request.method == 'OPTIONS':
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+            
         origin = request.headers.get('Origin')
-        response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin'
-        response.headers['Access-Control-Max-Age'] = '600'
+        if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            
         return response
     
     # Register blueprints
