@@ -94,14 +94,6 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
     """Helper function to make API requests with retries and various connection configurations"""
     last_error = None
     
-    # Verify API token is present and valid
-    if not TOGETHER_API_TOKEN or len(TOGETHER_API_TOKEN.strip()) < 10:
-        raise Exception("Invalid or missing API token")
-    
-    print(f"Making API request to {url}")
-    print(f"Request data: {json.dumps(data, indent=2)}")
-    print(f"Headers (excluding auth): {json.dumps({k:v for k,v in headers.items() if k != 'authorization'}, indent=2)}")
-    
     # List of configurations to try
     configs = [
         {"verify": True, "proxies": None},  # Try direct connection first
@@ -113,42 +105,17 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
     for config in configs:
         for attempt in range(max_retries):
             try:
-                print(f"\nAttempt {attempt + 1}/{max_retries} with config: {config}")
-                
-                # Create session with specific config
-                session = requests.Session()
-                session.verify = config["verify"]
-                if config["proxies"] is not None:
-                    session.proxies = config["proxies"]
-                
-                # Make the request
-                response = session.post(
+                print(f"Attempting request with config: {config}, attempt {attempt + 1}/{max_retries}")
+                response = requests.post(
                     url,
                     json=data,
                     headers=headers,
-                    timeout=timeout
+                    timeout=timeout,
+                    **config
                 )
-                
-                print(f"Response status code: {response.status_code}")
-                
-                # Try to parse response content
-                try:
-                    response_data = response.json()
-                    print(f"Response data: {json.dumps(response_data, indent=2)}")
-                except:
-                    print(f"Raw response content: {response.text[:500]}...")
-                
                 if response.ok:
                     return response
-                    
                 print(f"Request failed with status {response.status_code}")
-                if response.status_code == 401:
-                    raise Exception("API authentication failed. Please check your API token.")
-                elif response.status_code == 403:
-                    raise Exception("API access forbidden. Please check your API permissions.")
-                elif response.status_code == 429:
-                    raise Exception("API rate limit exceeded. Please try again later.")
-                
             except requests.exceptions.SSLError as e:
                 print(f"SSL Error: {str(e)}")
                 last_error = e
@@ -158,91 +125,31 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
             except requests.exceptions.ConnectionError as e:
                 print(f"Connection Error: {str(e)}")
                 last_error = e
-            except requests.exceptions.Timeout as e:
-                print(f"Timeout Error: {str(e)}")
-                last_error = e
             except Exception as e:
                 print(f"Unexpected error: {str(e)}")
-                print(f"Error type: {type(e)}")
                 last_error = e
             
             if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff
-                print(f"Waiting {wait_time} seconds before next attempt...")
-                time.sleep(wait_time)
+                time.sleep(2 ** attempt)  # Exponential backoff
     
-    error_msg = str(last_error) if last_error else "Unknown error"
-    print(f"All connection attempts failed. Last error: {error_msg}")
-    raise Exception(f"All connection attempts failed: {error_msg}")
+    raise Exception(f"All connection attempts failed: {str(last_error)}")
 
 def query_together(prompt, params=None):
     try:
         print(f"Starting image generation with prompt: {prompt}")
         
-        # First, check if the model is available
-        try:
-            check_url = "https://api.together.xyz/v1/models"
-            check_headers = {
-                "accept": "application/json",
-                "authorization": f"Bearer {TOGETHER_API_TOKEN}"
-            }
-            
-            print("Checking model availability...")
-            check_response = requests.get(check_url, headers=check_headers, timeout=30)
-            
-            if check_response.ok:
-                models = check_response.json()
-                # Check for the dev-lora model instead
-                model_found = any(m.get('name') == "black-forest-labs/FLUX.1-dev-lora" for m in models)
-                if not model_found:
-                    print("FLUX LoRA model not found in available models")
-                    # Fall back to Stable Diffusion XL
-                    print("Falling back to Stable Diffusion XL")
-                    model = "stabilityai/stable-diffusion-xl-base-1.0"
-                    steps = 30
-                    guidance = 7.5
-                else:
-                    print("FLUX LoRA model is available")
-                    model = "black-forest-labs/FLUX.1-dev-lora"
-                    steps = 28  # As recommended in docs
-                    guidance = 7.5
-            else:
-                print("Failed to check model availability")
-                # Default to Stable Diffusion XL
-                model = "stabilityai/stable-diffusion-xl-base-1.0"
-                steps = 30
-                guidance = 7.5
-        except Exception as e:
-            print(f"Error checking model availability: {str(e)}")
-            # Default to Stable Diffusion XL
-            model = "stabilityai/stable-diffusion-xl-base-1.0"
-            steps = 30
-            guidance = 7.5
-        
+        # Set default parameters for FLUX.1-schnell-Free
         default_params = {
-            "model": model,
+            "model": "black-forest-labs/FLUX.1-schnell-Free",
             "prompt": prompt,
-            "steps": steps,  # Fixed: Using the correct steps value
+            "steps": 20,  # Optimized for FLUX model
             "n": 1,
-            "height": 768,  # Standard size from docs
-            "width": 1024,  # Standard size from docs
-            "guidance": guidance,
-            "output_format": "url",  # As shown in docs
-            "response_format": "url"  # As shown in docs
+            "height": 1024,
+            "width": 1024,
+            "guidance": 3.5,  # Optimized for FLUX model
+            "output_format": "jpeg",
+            "response_format": "url"  # Keep this to maintain compatibility
         }
-        
-        # Only add LoRA if using FLUX model
-        if model == "black-forest-labs/FLUX.1-dev-lora":
-            default_params["image_loras"] = [
-                {
-                    "path": "https://huggingface.co/XLabs-AI/flux-RealismLora",
-                    "scale": 0.8
-                },
-                {
-                    "path": "https://huggingface.co/Shakker-Labs/FLUX.1-dev-LoRA-add-details",
-                    "scale": 0.8
-                }
-            ]
         
         if params:
             default_params.update(params)
@@ -255,87 +162,51 @@ def query_together(prompt, params=None):
             "authorization": f"Bearer {TOGETHER_API_TOKEN}"
         }
         
-        # Add retry logic specifically for rate limit errors
-        max_retries = 3
-        base_wait_time = 5  # Start with 5 seconds
-        last_error = None
+        response = make_api_request_with_retries(
+            TOGETHER_API_URL,
+            headers=headers,
+            data=default_params,
+            timeout=60
+        )
         
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    wait_time = base_wait_time * (2 ** (attempt - 1))  # Exponential backoff
-                    print(f"Rate limit hit. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}...")
-                    time.sleep(wait_time)
-                
-                response = make_api_request_with_retries(
-                    TOGETHER_API_URL,
-                    headers=headers,
-                    data=default_params,
-                    timeout=60
-                )
-                
-                print(f"Response status: {response.status_code}")
-                result = response.json()
-                print(f"API Response: {json.dumps(result, indent=2)}")
-                
-                if response.ok:
-                    if 'data' not in result or not result['data']:
-                        raise Exception("No data in API response")
-                        
-                    if not isinstance(result['data'], list) or not result['data']:
-                        raise Exception("Invalid data format in API response")
-                        
-                    if 'url' not in result['data'][0]:
-                        raise Exception("No image URL in API response")
-                        
-                    image_url = result['data'][0]['url']
-                    print(f"Got image URL: {image_url}")
-                    
-                    # Download the image with retries
-                    download_attempts = 3
-                    for dl_attempt in range(download_attempts):
-                        try:
-                            img_response = requests.get(image_url, timeout=30)
-                            if img_response.ok:
-                                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                                return image_base64
-                            elif dl_attempt < download_attempts - 1:
-                                print(f"Image download failed, retrying... ({dl_attempt + 1}/{download_attempts})")
-                                time.sleep(2)
-                            else:
-                                raise Exception("Failed to download generated image after multiple attempts")
-                        except Exception as dl_error:
-                            last_error = dl_error
-                            if dl_attempt == download_attempts - 1:
-                                raise Exception(f"Image download failed: {str(dl_error)}")
-                            time.sleep(2)
-                
-                elif response.status_code == 429:
-                    error_msg = result.get('error', {}).get('message', 'Rate limit exceeded')
-                    print(f"Rate limit error: {error_msg}")
-                    if attempt == max_retries - 1:
-                        raise Exception(f"API rate limit exceeded. Please wait {base_wait_time * (2 ** attempt)} seconds before trying again.")
-                    last_error = Exception(error_msg)
+        print(f"Response status: {response.status_code}")
+        result = response.json()
+        print("Successfully received response from API")
+        
+        if 'data' in result and len(result['data']) > 0 and 'url' in result['data'][0]:
+            image_url = result['data'][0]['url']
+            print(f"Got image URL: {image_url}")
+            
+            # Download the image with retry logic
+            for config in [
+                {"verify": True, "proxies": None},
+                {"verify": False, "proxies": None},
+                {"verify": True, "proxies": {}},
+                {"verify": False, "proxies": {}}
+            ]:
+                try:
+                    img_response = requests.get(
+                        image_url,
+                        timeout=30,
+                        **config
+                    )
+                    if img_response.ok:
+                        break
+                except Exception as e:
+                    print(f"Image download attempt failed with config {config}: {str(e)}")
                     continue
-                else:
-                    error_msg = result.get('error', {}).get('message', str(result))
-                    last_error = Exception(f"API Error: {error_msg}")
-                    raise last_error
-                
-            except Exception as e:
-                last_error = e
-                if "rate limit" in str(e).lower() and attempt < max_retries - 1:
-                    continue
-                if attempt == max_retries - 1:
-                    error_msg = str(last_error) if last_error else "Unknown error"
-                    if "rate limit" in error_msg.lower():
-                        raise Exception(f"API rate limit exceeded. Please wait {base_wait_time * (2 ** attempt)} seconds before trying again.")
-                    raise Exception(f"Image generation failed after {max_retries} attempts: {error_msg}")
-                
+            
+            if not img_response.ok:
+                raise Exception("Failed to download generated image after all attempts")
+            
+            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+            return image_base64
+        else:
+            print(f"Unexpected API response format: {result}")
+            raise Exception("No image URL in response")
+            
     except Exception as e:
         print(f"Error in query_together: {str(e)}")
-        if "rate limit" in str(e).lower():
-            raise Exception(f"API rate limit exceeded. Please try again in {base_wait_time * (2 ** (max_retries-1))} seconds.")
         raise Exception(f"Image generation failed: {str(e)}")
 
 def query_together_translation(text, to_lang='english'):
@@ -567,51 +438,172 @@ def generate_image():
                 print("Language detection failed, defaulting to English")
             
             # Generate image using Together.xyz
+            image_base64 = query_together(prompt)
+            
+            if not image_base64:
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to generate image"
+                }), 500
+            
             try:
-                image_base64 = query_together(prompt)
+                # Convert base64 to bytes
+                image_data = base64.b64decode(image_base64)
                 
-                if not image_base64:
-                    return jsonify({
-                        "success": False,
-                        "error": "Failed to generate image: No image data returned"
-                    }), 500
-                    
+                # Generate a unique filename with timestamp and sanitized prompt
+                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+                # Use the translated prompt for the filename
+                sanitized_prompt = ''.join(c if c.isalnum() else '_' for c in prompt[:50])
+                filename = f"generated_{timestamp}_{sanitized_prompt}_{uuid.uuid4()}.jpg"
+                
+                print(f"Attempting to save image with filename: {filename}")
+                
+                # Upload to Supabase Storage with retry logic
+                max_retries = 3
+                storage_success = False
+                public_url = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        print(f"Storage upload attempt {attempt + 1}")
+                        print(f"Uploading to bucket: generated-images, filename: {filename}")
+                        print(f"Image data size: {len(image_data)} bytes")
+                        
+                        storage_response = supabase.storage.from_('generated-images').upload(
+                            filename,
+                            image_data,
+                            {
+                                'content-type': 'image/jpeg',
+                                'cache-control': 'public, max-age=31536000'
+                            }
+                        )
+                        
+                        print(f"Storage response: {storage_response}")
+                        
+                        if storage_response:
+                            print(f"Successfully uploaded image on attempt {attempt + 1}")
+                            storage_success = True
+                            
+                            # Get public URL
+                            print("Getting public URL...")
+                            public_url_response = supabase.storage.from_('generated-images').get_public_url(filename)
+                            print(f"Public URL response: {public_url_response}")
+                            
+                            if isinstance(public_url_response, dict):
+                                public_url = public_url_response.get('publicUrl')
+                            else:
+                                public_url = public_url_response
+                                
+                            if not public_url:
+                                raise Exception("Failed to get public URL from response")
+                                
+                            print(f"Generated public URL: {public_url}")
+                            
+                            # Verify the image is accessible
+                            print("Verifying image accessibility...")
+                            verify_response = requests.head(public_url, timeout=10)
+                            print(f"Verify response status: {verify_response.status_code}")
+                            
+                            if not verify_response.ok:
+                                raise Exception(f"Uploaded image is not accessible: {verify_response.status_code}")
+                                
+                            print("Image URL verified as accessible")
+                            break
+                    except Exception as upload_error:
+                        print(f"Upload attempt {attempt + 1} failed with error: {str(upload_error)}")
+                        print(f"Error type: {type(upload_error)}")
+                        if hasattr(upload_error, 'response'):
+                            print(f"Response content: {upload_error.response.content}")
+                        if attempt == max_retries - 1:
+                            raise upload_error
+                        time.sleep(1)  # Wait before retrying
+                
+                if not storage_success or not public_url:
+                    raise Exception("Failed to upload image to storage")
+                
+                # Save metadata to database with retry logic
+                metadata = {
+                    'id': str(uuid.uuid4()),
+                    'prompt': prompt,  # Store the original prompt
+                    'image_url': public_url,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'user_id': user_id if user_id else None
+                }
+                
+                print(f"Attempting to save metadata to database: {metadata}")
+                
+                for attempt in range(max_retries):
+                    try:
+                        print(f"Database save attempt {attempt + 1}")
+                        
+                        # First, verify we can connect to the database
+                        test_query = supabase.table('generated_images').select('*').limit(1).execute()
+                        print("Database connection verified")
+                        
+                        # Attempt the insert
+                        db_response = supabase.table('generated_images').insert(metadata).execute()
+                        print(f"Database response: {db_response}")
+                        
+                        if not db_response:
+                            print("No response from database insert")
+                            raise Exception("No response from database insert")
+                            
+                        if not hasattr(db_response, 'data') or not db_response.data:
+                            print("No data in database response")
+                            raise Exception("No data in database response")
+                        
+                        saved_data = db_response.data[0]
+                        print(f"Successfully saved to database: {saved_data}")
+                        
+                        # Verify the save by fetching the record
+                        verify_response = supabase.table('generated_images').select('*').eq('id', metadata['id']).execute()
+                        if not verify_response or not verify_response.data or not verify_response.data[0]:
+                            print("Failed to verify saved data")
+                            print(f"Verify response: {verify_response}")
+                            raise Exception("Failed to verify saved data")
+                            
+                        print(f"Verified saved data: {verify_response.data[0]}")
+                        break
+                    except Exception as db_error:
+                        error_msg = str(db_error)
+                        print(f"Database save attempt {attempt + 1} failed with error: {error_msg}")
+                        
+                        if hasattr(db_error, 'response'):
+                            print(f"Error response: {db_error.response.text if hasattr(db_error.response, 'text') else db_error.response}")
+                        
+                        if attempt == max_retries - 1:
+                            raise Exception(f"Database save failed after {max_retries} attempts: {error_msg}")
+                        
+                        time.sleep(1)  # Wait before retrying
+                
                 return jsonify({
                     "success": True,
-                    "message": "Image generated successfully",
-                    "image_url": f"data:image/jpeg;base64,{image_base64}"
+                    "message": "Image generated and saved successfully",
+                    "image_url": f"data:image/jpeg;base64,{image_base64}",  # For immediate display
+                    "stored_url": public_url,
+                    "metadata": metadata
                 }), 200
                 
-            except Exception as gen_error:
-                error_msg = str(gen_error)
-                print(f"Image generation error: {error_msg}")
-                
-                if "API Error" in error_msg:
-                    # This is an API-specific error, return it directly
-                    return jsonify({
-                        "success": False,
-                        "error": error_msg
-                    }), 500
-                else:
-                    # This is an unexpected error
-                    return jsonify({
-                        "success": False,
-                        "error": f"Failed to generate image: {error_msg}"
-                    }), 500
-                
+            except Exception as storage_error:
+                print(f"Storage/Database error: {str(storage_error)}")
+                # If storage/database fails, still return the base64 image
+                return jsonify({
+                    "success": True,
+                    "message": "Image generated but storage failed",
+                    "image_url": f"data:image/jpeg;base64,{image_base64}",
+                    "error_details": str(storage_error)
+                }), 200
+        
         except Exception as e:
-            print(f"Error in generate endpoint processing: {str(e)}")
+            print(f"Error generating image: {str(e)}")
             return jsonify({
                 "success": False,
-                "error": f"Error processing request: {str(e)}"
+                "error": str(e)
             }), 500
-            
+    
     except Exception as e:
         print(f"Error in generate endpoint: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 400
+        return jsonify({"error": str(e)}), 400
 
 @ai_bp.route('/text-to-video', methods=['POST', 'OPTIONS'])
 @rate_limit()
