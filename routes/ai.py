@@ -893,37 +893,38 @@ def enhance_image():
                 "error": "No image provided"
             }), 400
 
-        # Build the enhancement prompt based on settings
-        base_prompt = "Enhance this image with perfect exposure, optimal contrast, and natural colors."
-        style_prompts = {
-            'natural': "Maintain natural and realistic appearance while improving quality.",
-            'vibrant': "Boost colors and vibrancy while keeping the image balanced.",
-            'artistic': "Apply artistic enhancement with dramatic lighting and mood."
-        }
-        enhance_level_prompts = {
-            'low': "Apply subtle improvements.",
-            'medium': "Apply moderate enhancements for a balanced result.",
-            'high': "Apply strong enhancements for maximum impact."
-        }
-        focus_prompts = {
-            'overall': "Focus on overall image quality.",
-            'details': "Emphasize fine details and textures.",
-            'colors': "Prioritize color enhancement and balance."
+        # Remove data URL prefix if present
+        if image_data.startswith('data:image'):
+            image_data = image_data.split(',')[1]
+
+        # Build the enhancement parameters based on settings
+        enhance_level_params = {
+            'low': {'guidance': 2.5, 'steps': 10},
+            'medium': {'guidance': 3.5, 'steps': 15},
+            'high': {'guidance': 4.5, 'steps': 20}
         }
 
-        enhancement_prompt = f"{base_prompt} {style_prompts[settings['style']]} {enhance_level_prompts[settings['enhance_level']]} {focus_prompts[settings['focus']]}"
-            
-        # Prepare the API request
+        style_params = {
+            'natural': {'model': 'stabilityai/sdxl-turbo'},
+            'vibrant': {'model': 'stabilityai/stable-diffusion-xl-base-1.0'},
+            'artistic': {'model': 'runwayml/stable-diffusion-v1-5'}
+        }
+
+        # Get parameters based on settings
+        params = enhance_level_params[settings['enhance_level']]
+        model = style_params[settings['style']]['model']
+
+        # Prepare the API request for image-to-image enhancement
         payload = {
-            "model": "black-forest-labs/FLUX.1-schnell-Free",
-            "steps": 4,
-            "n": 1,
-            "height": 1024,
-            "width": 1024,
-            "guidance": 3.5,
-            "output_format": "jpeg",
-            "prompt": enhancement_prompt,
-            "image_url": image_data  # Pass the base64 image data
+            "model": model,
+            "prompt": "enhance this image, maintain original content and composition",
+            "negative_prompt": "blur, pixelated, low quality, distorted",
+            "image": image_data,
+            "steps": params['steps'],
+            "guidance": params['guidance'],
+            "seed": 42,  # Fixed seed for consistency
+            "scheduler": "EulerAncestralDiscrete",
+            "output_format": "jpeg"
         }
         
         headers = {
@@ -934,24 +935,27 @@ def enhance_image():
 
         try:
             # Make the API request
-            response = requests.post(TOGETHER_API_URL, json=payload, headers=headers)
-            response_data = response.json()
+            response = requests.post(
+                "https://api.together.xyz/v1/images/edit",  # Using the image edit endpoint
+                json=payload,
+                headers=headers
+            )
+            
+            if not response.ok:
+                print(f"API error response: {response.text}")
+                raise Exception(f"API request failed with status {response.status_code}")
 
-            if 'data' in response_data and len(response_data['data']) > 0 and 'url' in response_data['data'][0]:
-                enhanced_image_url = response_data['data'][0]['url']
-                
-                # Download the enhanced image
-                img_response = requests.get(enhanced_image_url)
-                if img_response.ok:
-                    enhanced_image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    return jsonify({
-                        "success": True,
-                        "result": f"data:image/jpeg;base64,{enhanced_image_base64}"
-                    }), 200
-                else:
-                    raise Exception("Failed to download enhanced image")
+            response_data = response.json()
+            print(f"API response: {response_data}")  # Debug log
+
+            if 'output' in response_data and response_data['output']:
+                enhanced_image_base64 = response_data['output'][0]
+                return jsonify({
+                    "success": True,
+                    "result": f"data:image/jpeg;base64,{enhanced_image_base64}"
+                }), 200
             else:
-                raise Exception("Invalid response from Together API")
+                raise Exception("No enhanced image in API response")
             
         except Exception as api_error:
             print(f"API error: {str(api_error)}")
@@ -961,6 +965,7 @@ def enhance_image():
             }), 500
         
     except Exception as e:
+        print(f"General error: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e)
