@@ -192,19 +192,20 @@ def query_together(prompt, params=None):
             
             if check_response.ok:
                 models = check_response.json()
-                model_found = any(m.get('name') == "black-forest-labs/FLUX.1-schnell-Free" for m in models)
+                # Check for the dev-lora model instead
+                model_found = any(m.get('name') == "black-forest-labs/FLUX.1-dev-lora" for m in models)
                 if not model_found:
-                    print("FLUX model not found in available models")
+                    print("FLUX LoRA model not found in available models")
                     # Fall back to Stable Diffusion XL
                     print("Falling back to Stable Diffusion XL")
                     model = "stabilityai/stable-diffusion-xl-base-1.0"
                     steps = 30
                     guidance = 7.5
                 else:
-                    print("FLUX model is available")
-                    model = "black-forest-labs/FLUX.1-schnell-Free"
-                    steps = 20
-                    guidance = 3.5
+                    print("FLUX LoRA model is available")
+                    model = "black-forest-labs/FLUX.1-dev-lora"
+                    steps = 28  # As recommended in docs
+                    guidance = 7.5
             else:
                 print("Failed to check model availability")
                 # Default to Stable Diffusion XL
@@ -223,19 +224,23 @@ def query_together(prompt, params=None):
             "prompt": prompt,
             "steps": steps,
             "n": 1,
-            "height": 1024,
-            "width": 1024,
+            "height": 768,  # Standard size from docs
+            "width": 1024,  # Standard size from docs
             "guidance": guidance,
-            "output_format": "jpeg",
-            "scheduler": "euler_a"
+            "output_format": "url",  # As shown in docs
+            "response_format": "url"  # As shown in docs
         }
         
         # Only add LoRA if using FLUX model
-        if model == "black-forest-labs/FLUX.1-schnell-Free":
+        if model == "black-forest-labs/FLUX.1-dev-lora":
             default_params["image_loras"] = [
                 {
-                    "path": "https://huggingface.co/strangerzonehf/Flux-Midjourney-Mix2-LoRA",
-                    "scale": 2
+                    "path": "https://huggingface.co/XLabs-AI/flux-RealismLora",
+                    "scale": 0.8
+                },
+                {
+                    "path": "https://huggingface.co/Shakker-Labs/FLUX.1-dev-LoRA-add-details",
+                    "scale": 0.8
                 }
             ]
         
