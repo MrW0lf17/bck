@@ -142,7 +142,7 @@ def query_together(prompt, params=None):
         default_params = {
             "model": "black-forest-labs/FLUX.1-schnell-Free",
             "prompt": prompt,
-            "steps": 20,  # Optimized for FLUX model
+            "steps": 4,  # Reduced steps for faster generation
             "n": 1,
             "height": 1024,
             "width": 1024,
