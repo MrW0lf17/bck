@@ -36,19 +36,17 @@ def create_app():
     logger.info("Starting application initialization...")
     app = Flask(__name__)
     
-    # Configure CORS
-    CORS(app, 
-        resources={
-            r"/*": {
-                "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
-                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
-                "expose_headers": ["Content-Type"],
-                "supports_credentials": True,
-                "max_age": 600
-            }
+    # Configure CORS with all necessary headers
+    CORS(app, resources={
+        r"/*": {
+            "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True,
+            "max_age": 600
         }
-    )
+    })
     
     # Global after request handler for CORS
     @app.after_request
@@ -57,11 +55,9 @@ def create_app():
         if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
             response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             response.headers['Access-Control-Max-Age'] = '600'
-            response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
-        
         return response
     
     # Register blueprints
