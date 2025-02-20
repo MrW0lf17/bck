@@ -94,6 +94,14 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
     """Helper function to make API requests with retries and various connection configurations"""
     last_error = None
     
+    # Verify API token is present and valid
+    if not TOGETHER_API_TOKEN or len(TOGETHER_API_TOKEN.strip()) < 10:
+        raise Exception("Invalid or missing API token")
+    
+    print(f"Making API request to {url}")
+    print(f"Request data: {json.dumps(data, indent=2)}")
+    print(f"Headers (excluding auth): {json.dumps({k:v for k,v in headers.items() if k != 'authorization'}, indent=2)}")
+    
     # List of configurations to try
     configs = [
         {"verify": True, "proxies": None},  # Try direct connection first
@@ -105,17 +113,42 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
     for config in configs:
         for attempt in range(max_retries):
             try:
-                print(f"Attempting request with config: {config}, attempt {attempt + 1}/{max_retries}")
-                response = requests.post(
+                print(f"\nAttempt {attempt + 1}/{max_retries} with config: {config}")
+                
+                # Create session with specific config
+                session = requests.Session()
+                session.verify = config["verify"]
+                if config["proxies"] is not None:
+                    session.proxies = config["proxies"]
+                
+                # Make the request
+                response = session.post(
                     url,
                     json=data,
                     headers=headers,
-                    timeout=timeout,
-                    **config
+                    timeout=timeout
                 )
+                
+                print(f"Response status code: {response.status_code}")
+                
+                # Try to parse response content
+                try:
+                    response_data = response.json()
+                    print(f"Response data: {json.dumps(response_data, indent=2)}")
+                except:
+                    print(f"Raw response content: {response.text[:500]}...")
+                
                 if response.ok:
                     return response
+                    
                 print(f"Request failed with status {response.status_code}")
+                if response.status_code == 401:
+                    raise Exception("API authentication failed. Please check your API token.")
+                elif response.status_code == 403:
+                    raise Exception("API access forbidden. Please check your API permissions.")
+                elif response.status_code == 429:
+                    raise Exception("API rate limit exceeded. Please try again later.")
+                
             except requests.exceptions.SSLError as e:
                 print(f"SSL Error: {str(e)}")
                 last_error = e
@@ -125,41 +158,91 @@ def make_api_request_with_retries(url, headers, data, max_retries=3, timeout=60)
             except requests.exceptions.ConnectionError as e:
                 print(f"Connection Error: {str(e)}")
                 last_error = e
+            except requests.exceptions.Timeout as e:
+                print(f"Timeout Error: {str(e)}")
+                last_error = e
             except Exception as e:
                 print(f"Unexpected error: {str(e)}")
+                print(f"Error type: {type(e)}")
                 last_error = e
             
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
+                wait_time = 2 ** attempt  # Exponential backoff
+                print(f"Waiting {wait_time} seconds before next attempt...")
+                time.sleep(wait_time)
     
-    raise Exception(f"All connection attempts failed: {str(last_error)}")
+    error_msg = str(last_error) if last_error else "Unknown error"
+    print(f"All connection attempts failed. Last error: {error_msg}")
+    raise Exception(f"All connection attempts failed: {error_msg}")
 
 def query_together(prompt, params=None):
     try:
         print(f"Starting image generation with prompt: {prompt}")
         
+        # First, check if the model is available
+        try:
+            check_url = "https://api.together.xyz/v1/models"
+            check_headers = {
+                "accept": "application/json",
+                "authorization": f"Bearer {TOGETHER_API_TOKEN}"
+            }
+            
+            print("Checking model availability...")
+            check_response = requests.get(check_url, headers=check_headers, timeout=30)
+            
+            if check_response.ok:
+                models = check_response.json()
+                model_found = any(m.get('name') == "black-forest-labs/FLUX.1-schnell-Free" for m in models)
+                if not model_found:
+                    print("FLUX model not found in available models")
+                    # Fall back to Stable Diffusion XL
+                    print("Falling back to Stable Diffusion XL")
+                    model = "stabilityai/stable-diffusion-xl-base-1.0"
+                    steps = 30
+                    guidance = 7.5
+                else:
+                    print("FLUX model is available")
+                    model = "black-forest-labs/FLUX.1-schnell-Free"
+                    steps = 20
+                    guidance = 3.5
+            else:
+                print("Failed to check model availability")
+                # Default to Stable Diffusion XL
+                model = "stabilityai/stable-diffusion-xl-base-1.0"
+                steps = 30
+                guidance = 7.5
+        except Exception as e:
+            print(f"Error checking model availability: {str(e)}")
+            # Default to Stable Diffusion XL
+            model = "stabilityai/stable-diffusion-xl-base-1.0"
+            steps = 30
+            guidance = 7.5
+        
         default_params = {
-            "model": "black-forest-labs/FLUX.1-schnell-Free",
+            "model": model,
             "prompt": prompt,
-            "steps": 20,
+            "steps": steps,
             "n": 1,
             "height": 1024,
             "width": 1024,
-            "guidance": 3.5,
+            "guidance": guidance,
             "output_format": "jpeg",
-            "scheduler": "euler_a",  # Adding explicit scheduler
-            "image_loras": [
+            "scheduler": "euler_a"
+        }
+        
+        # Only add LoRA if using FLUX model
+        if model == "black-forest-labs/FLUX.1-schnell-Free":
+            default_params["image_loras"] = [
                 {
                     "path": "https://huggingface.co/strangerzonehf/Flux-Midjourney-Mix2-LoRA",
                     "scale": 2
                 }
             ]
-        }
         
         if params:
             default_params.update(params)
             
-        print(f"Using parameters: {default_params}")
+        print(f"Using parameters: {json.dumps(default_params, indent=2)}")
         
         headers = {
             "accept": "application/json",
@@ -177,7 +260,7 @@ def query_together(prompt, params=None):
             
             print(f"Response status: {response.status_code}")
             result = response.json()
-            print(f"API Response: {result}")  # Log full response for debugging
+            print(f"API Response: {json.dumps(result, indent=2)}")  # Log full response for debugging
             
             if not response.ok:
                 error_msg = result.get('error', {}).get('message', str(result))
