@@ -616,25 +616,66 @@ def remove_background():
             
         # Read and validate the input image
         try:
-            input_bytes = file.read()
-            input_image = Image.open(BytesIO(input_bytes))
+            # Read file in chunks to avoid memory issues
+            chunks = []
+            while True:
+                chunk = file.read(8192)  # Read 8KB at a time
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            input_bytes = b''.join(chunks)
+            
+            # Validate file size
+            if len(input_bytes) > 5 * 1024 * 1024:  # 5MB limit
+                return jsonify({"error": "File too large. Maximum size is 5MB"}), 400
+            
+            # Open and validate image
+            try:
+                input_image = Image.open(BytesIO(input_bytes))
+            except Exception as img_error:
+                print(f"Invalid image format: {str(img_error)}")
+                return jsonify({"error": "Invalid image format"}), 400
             
             # Convert to RGB if necessary
-            if input_image.mode in ('RGBA', 'LA'):
+            if input_image.mode in ('RGBA', 'LA', 'P'):
                 input_image = input_image.convert('RGB')
-                
-            # Convert back to bytes
+            
+            # Resize if image is too large
+            max_dimension = 2048
+            if max(input_image.size) > max_dimension:
+                ratio = max_dimension / max(input_image.size)
+                new_size = tuple(int(dim * ratio) for dim in input_image.size)
+                input_image = input_image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convert to bytes
             input_buffer = BytesIO()
-            input_image.save(input_buffer, format='PNG')
+            input_image.save(input_buffer, format='PNG', optimize=True)
             input_bytes = input_buffer.getvalue()
             
-            # Process image with rembg
-            print("Processing image with rembg...")
-            output_data = remove(input_bytes)
-            print("Image processing completed")
+            # Clear PIL image to free memory
+            input_image.close()
+            input_buffer.close()
             
-            # Convert to base64 first
-            image_base64 = base64.b64encode(output_data).decode('utf-8')
+            print("Processing image with rembg...")
+            try:
+                output_data = remove(input_bytes)
+                print("Image processing completed")
+            except Exception as rembg_error:
+                print(f"Rembg processing error: {str(rembg_error)}")
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to process image with background removal service"
+                }), 500
+            
+            # Convert to base64
+            try:
+                image_base64 = base64.b64encode(output_data).decode('utf-8')
+            except Exception as b64_error:
+                print(f"Base64 encoding error: {str(b64_error)}")
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to encode processed image"
+                }), 500
             
             try:
                 # Generate unique filename
