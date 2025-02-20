@@ -605,6 +605,7 @@ def generate_image():
         return jsonify({"error": str(e)}), 400
 
 @ai_bp.route('/remove-background', methods=['POST', 'OPTIONS'])
+@rate_limit()
 def remove_background():
     if request.method == 'OPTIONS':
         return '', 204
@@ -617,74 +618,129 @@ def remove_background():
         if file.filename == '':
             return jsonify({"error": "No selected file"}), 400
             
-        # Validate file type
-        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
-        if '.' not in file.filename or \
-           file.filename.rsplit('.', 1)[1].lower() not in allowed_extensions:
-            return jsonify({"error": "Invalid file type. Allowed types: PNG, JPG, JPEG, WEBP"}), 400
-            
-        # Check file size (10MB limit)
+        # Validate file size (10MB limit)
         file_data = file.read()
         if len(file_data) > 10 * 1024 * 1024:  # 10MB in bytes
             return jsonify({"error": "File size too large. Maximum size is 10MB"}), 400
-        
+            
         try:
-            # Process image with rembg
-            output_data = remove(file_data)
+            # Process image with rembg with retry logic
+            max_retries = 3
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"Processing attempt {attempt + 1}")
+                    output_data = remove(file_data)
+                    if output_data:
+                        break
+                except Exception as e:
+                    print(f"Processing attempt {attempt + 1} failed: {str(e)}")
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # Exponential backoff
             
             if not output_data:
-                return jsonify({"error": "Failed to process image"}), 400
+                raise Exception(f"Background removal failed after {max_retries} attempts: {str(last_error)}")
             
             # Generate unique filename
             timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
             filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
             
-            try:
-                # Upload to Supabase Storage
-                storage_response = supabase.storage.from_('generated-images').upload(
-                    filename,
-                    output_data,
-                    {
-                        'content-type': 'image/png',
-                        'cache-control': 'public, max-age=31536000'
+            # Upload to Supabase Storage with retry logic
+            max_retries = 3
+            storage_success = False
+            public_url = None
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"Storage upload attempt {attempt + 1}")
+                    print(f"Uploading to bucket: generated-images, filename: {filename}")
+                    print(f"Image data size: {len(output_data)} bytes")
+                    
+                    storage_response = supabase.storage.from_('generated-images').upload(
+                        filename,
+                        output_data,
+                        {
+                            'content-type': 'image/png',
+                            'cache-control': 'public, max-age=31536000'
+                        }
+                    )
+                    
+                    if storage_response:
+                        print(f"Successfully uploaded image on attempt {attempt + 1}")
+                        storage_success = True
+                        
+                        # Get public URL
+                        public_url_response = supabase.storage.from_('generated-images').get_public_url(filename)
+                        
+                        if isinstance(public_url_response, dict):
+                            public_url = public_url_response.get('publicUrl')
+                        else:
+                            public_url = public_url_response
+                            
+                        if not public_url:
+                            raise Exception("Failed to get public URL from response")
+                            
+                        # Verify the image is accessible
+                        verify_response = requests.head(public_url, timeout=10)
+                        if not verify_response.ok:
+                            raise Exception(f"Uploaded image is not accessible: {verify_response.status_code}")
+                            
+                        break
+                except Exception as e:
+                    print(f"Storage attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == max_retries - 1:
+                        raise e
+                    time.sleep(2 ** attempt)  # Exponential backoff
+            
+            if storage_success and public_url:
+                # Save metadata to database
+                try:
+                    metadata = {
+                        'id': str(uuid.uuid4()),
+                        'prompt': 'Background removed image',
+                        'image_url': public_url,
+                        'created_at': datetime.utcnow().isoformat(),
+                        'type': 'background-removal'
                     }
-                )
-                
-                if not storage_response:
-                    raise Exception("Failed to upload to storage")
-                
-                # Get public URL
-                public_url = supabase.storage.from_('generated-images').get_public_url(filename)
-                
-                if not public_url:
-                    raise Exception("Failed to get public URL")
-                
-                return jsonify({
-                    "success": True,
-                    "message": "Background removed successfully",
-                    "processed_url": public_url
-                }), 200
-                
-            except Exception as storage_error:
-                print(f"Storage error: {str(storage_error)}")
-                # If storage fails, return the processed image as base64
+                    
+                    db_response = supabase.table('generated_images').insert(metadata).execute()
+                    print(f"Database save response: {db_response}")
+                    
+                    return jsonify({
+                        "success": True,
+                        "message": "Background removed and saved successfully",
+                        "processed_url": public_url,
+                        "metadata": metadata
+                    }), 200
+                except Exception as db_error:
+                    print(f"Database error: {str(db_error)}")
+                    # If database fails, still return the processed URL
+                    return jsonify({
+                        "success": True,
+                        "message": "Background removed but database save failed",
+                        "processed_url": public_url,
+                        "error_details": str(db_error)
+                    }), 200
+            else:
+                # If storage fails, return base64
                 image_base64 = base64.b64encode(output_data).decode('utf-8')
                 return jsonify({
                     "success": True,
                     "message": "Background removed but storage failed",
                     "image_data": f"data:image/png;base64,{image_base64}",
-                    "error_details": str(storage_error)
                 }), 200
                 
-        except Exception as process_error:
-            print(f"Processing error: {str(process_error)}")
+        except Exception as processing_error:
+            print(f"Processing error: {str(processing_error)}")
             return jsonify({
                 "success": False,
-                "error": f"Failed to process image: {str(process_error)}"
-            }), 400
+                "error": f"Failed to process image: {str(processing_error)}"
+            }), 500
             
     except Exception as e:
-        print(f"Error in remove-background: {str(e)}")
+        print(f"Error in remove-background endpoint: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e)
