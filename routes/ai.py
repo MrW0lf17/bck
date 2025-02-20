@@ -604,8 +604,11 @@ def generate_image():
         print(f"Error in generate endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 400
 
-@ai_bp.route('/remove-background', methods=['POST'])
+@ai_bp.route('/remove-background', methods=['POST', 'OPTIONS'])
 def remove_background():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
@@ -614,75 +617,29 @@ def remove_background():
         if file.filename == '':
             return jsonify({"error": "No selected file"}), 400
             
-        # Read and validate the input image
+        # Validate file type
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
+        if '.' not in file.filename or \
+           file.filename.rsplit('.', 1)[1].lower() not in allowed_extensions:
+            return jsonify({"error": "Invalid file type. Allowed types: PNG, JPG, JPEG, WEBP"}), 400
+            
+        # Check file size (10MB limit)
+        file_data = file.read()
+        if len(file_data) > 10 * 1024 * 1024:  # 10MB in bytes
+            return jsonify({"error": "File size too large. Maximum size is 10MB"}), 400
+        
         try:
-            # Read file in chunks to avoid memory issues
-            chunks = []
-            while True:
-                chunk = file.read(8192)  # Read 8KB at a time
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            input_bytes = b''.join(chunks)
+            # Process image with rembg
+            output_data = remove(file_data)
             
-            # Validate file size
-            if len(input_bytes) > 5 * 1024 * 1024:  # 5MB limit
-                return jsonify({"error": "File too large. Maximum size is 5MB"}), 400
+            if not output_data:
+                return jsonify({"error": "Failed to process image"}), 400
             
-            # Open and validate image
-            try:
-                input_image = Image.open(BytesIO(input_bytes))
-            except Exception as img_error:
-                print(f"Invalid image format: {str(img_error)}")
-                return jsonify({"error": "Invalid image format"}), 400
-            
-            # Convert to RGB if necessary
-            if input_image.mode in ('RGBA', 'LA', 'P'):
-                input_image = input_image.convert('RGB')
-            
-            # Resize if image is too large
-            max_dimension = 2048
-            if max(input_image.size) > max_dimension:
-                ratio = max_dimension / max(input_image.size)
-                new_size = tuple(int(dim * ratio) for dim in input_image.size)
-                input_image = input_image.resize(new_size, Image.Resampling.LANCZOS)
-            
-            # Convert to bytes
-            input_buffer = BytesIO()
-            input_image.save(input_buffer, format='PNG', optimize=True)
-            input_bytes = input_buffer.getvalue()
-            
-            # Clear PIL image to free memory
-            input_image.close()
-            input_buffer.close()
-            
-            print("Processing image with rembg...")
-            try:
-                output_data = remove(input_bytes)
-                print("Image processing completed")
-            except Exception as rembg_error:
-                print(f"Rembg processing error: {str(rembg_error)}")
-                return jsonify({
-                    "success": False,
-                    "error": "Failed to process image with background removal service"
-                }), 500
-            
-            # Convert to base64
-            try:
-                image_base64 = base64.b64encode(output_data).decode('utf-8')
-            except Exception as b64_error:
-                print(f"Base64 encoding error: {str(b64_error)}")
-                return jsonify({
-                    "success": False,
-                    "error": "Failed to encode processed image"
-                }), 500
+            # Generate unique filename
+            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
             
             try:
-                # Generate unique filename
-                timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-                filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
-                
-                print(f"Uploading to Supabase storage: {filename}")
                 # Upload to Supabase Storage
                 storage_response = supabase.storage.from_('generated-images').upload(
                     filename,
@@ -693,24 +650,30 @@ def remove_background():
                     }
                 )
                 
+                if not storage_response:
+                    raise Exception("Failed to upload to storage")
+                
                 # Get public URL
                 public_url = supabase.storage.from_('generated-images').get_public_url(filename)
-                print(f"Upload successful, public URL: {public_url}")
+                
+                if not public_url:
+                    raise Exception("Failed to get public URL")
                 
                 return jsonify({
                     "success": True,
                     "message": "Background removed successfully",
-                    "processed_url": public_url,
-                    "image_data": f"data:image/png;base64,{image_base64}"
+                    "processed_url": public_url
                 }), 200
                 
             except Exception as storage_error:
                 print(f"Storage error: {str(storage_error)}")
                 # If storage fails, return the processed image as base64
+                image_base64 = base64.b64encode(output_data).decode('utf-8')
                 return jsonify({
                     "success": True,
                     "message": "Background removed but storage failed",
-                    "image_data": f"data:image/png;base64,{image_base64}"
+                    "image_data": f"data:image/png;base64,{image_base64}",
+                    "error_details": str(storage_error)
                 }), 200
                 
         except Exception as process_error:
@@ -721,10 +684,10 @@ def remove_background():
             }), 400
             
     except Exception as e:
-        print(f"Background removal error: {str(e)}")
+        print(f"Error in remove-background: {str(e)}")
         return jsonify({
             "success": False,
-            "error": f"Error processing request: {str(e)}"
+            "error": str(e)
         }), 400
 
 def process_uploaded_image(file):
