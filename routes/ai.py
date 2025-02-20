@@ -258,6 +258,7 @@ def query_together(prompt, params=None):
         # Add retry logic specifically for rate limit errors
         max_retries = 3
         base_wait_time = 5  # Start with 5 seconds
+        last_error = None
         
         for attempt in range(max_retries):
             try:
@@ -290,29 +291,51 @@ def query_together(prompt, params=None):
                     image_url = result['data'][0]['url']
                     print(f"Got image URL: {image_url}")
                     
-                    # Download the image
-                    img_response = requests.get(image_url, timeout=30)
-                    if not img_response.ok:
-                        raise Exception("Failed to download generated image")
-                    
-                    image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    return image_base64
+                    # Download the image with retries
+                    download_attempts = 3
+                    for dl_attempt in range(download_attempts):
+                        try:
+                            img_response = requests.get(image_url, timeout=30)
+                            if img_response.ok:
+                                image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                                return image_base64
+                            elif dl_attempt < download_attempts - 1:
+                                print(f"Image download failed, retrying... ({dl_attempt + 1}/{download_attempts})")
+                                time.sleep(2)
+                            else:
+                                raise Exception("Failed to download generated image after multiple attempts")
+                        except Exception as dl_error:
+                            last_error = dl_error
+                            if dl_attempt == download_attempts - 1:
+                                raise Exception(f"Image download failed: {str(dl_error)}")
+                            time.sleep(2)
                 
                 elif response.status_code == 429:
+                    error_msg = result.get('error', {}).get('message', 'Rate limit exceeded')
+                    print(f"Rate limit error: {error_msg}")
                     if attempt == max_retries - 1:
-                        raise Exception("API rate limit exceeded. Please try again in a few minutes.")
+                        raise Exception(f"API rate limit exceeded. Please wait {base_wait_time * (2 ** attempt)} seconds before trying again.")
+                    last_error = Exception(error_msg)
                     continue
                 else:
                     error_msg = result.get('error', {}).get('message', str(result))
-                    raise Exception(f"API Error: {error_msg}")
+                    last_error = Exception(f"API Error: {error_msg}")
+                    raise last_error
                 
             except Exception as e:
+                last_error = e
                 if "rate limit" in str(e).lower() and attempt < max_retries - 1:
                     continue
-                raise e
+                if attempt == max_retries - 1:
+                    error_msg = str(last_error) if last_error else "Unknown error"
+                    if "rate limit" in error_msg.lower():
+                        raise Exception(f"API rate limit exceeded. Please wait {base_wait_time * (2 ** attempt)} seconds before trying again.")
+                    raise Exception(f"Image generation failed after {max_retries} attempts: {error_msg}")
                 
     except Exception as e:
         print(f"Error in query_together: {str(e)}")
+        if "rate limit" in str(e).lower():
+            raise Exception(f"API rate limit exceeded. Please try again in {base_wait_time * (2 ** (max_retries-1))} seconds.")
         raise Exception(f"Image generation failed: {str(e)}")
 
 def query_together_translation(text, to_lang='english'):
