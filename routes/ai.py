@@ -20,6 +20,8 @@ import json
 import textwrap
 import subprocess
 import replicate
+from utils.auth import verify_auth_token
+from utils.rate_limit import rate_limit
 
 ai_bp = Blueprint('ai', __name__)
 
@@ -815,4 +817,148 @@ Remember to stay in character as DIZ bot throughout the conversation."""
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
+
+def base64_to_numpy(base64_str):
+    """Convert base64 image to numpy array."""
+    try:
+        # Remove data URL prefix if present
+        if ',' in base64_str:
+            base64_str = base64_str.split(',')[1]
+        
+        # Decode base64 to bytes
+        img_data = base64.b64decode(base64_str)
+        
+        # Convert to numpy array
+        nparr = np.frombuffer(img_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        return img
+    except Exception as e:
+        raise Exception(f"Failed to convert base64 to image: {str(e)}")
+
+def numpy_to_base64(img_array):
+    """Convert numpy array to base64 string."""
+    try:
+        # Encode image to jpg format
+        _, buffer = cv2.imencode('.jpg', img_array)
+        # Convert to base64
+        base64_str = base64.b64encode(buffer).decode('utf-8')
+        return f"data:image/jpeg;base64,{base64_str}"
+    except Exception as e:
+        raise Exception(f"Failed to convert image to base64: {str(e)}")
+
+def blend_images(original, generated, mask):
+    """Blend original and generated images using the mask."""
+    try:
+        # Ensure all images have same dimensions
+        if original.shape != generated.shape or original.shape[:2] != mask.shape[:2]:
+            generated = cv2.resize(generated, (original.shape[1], original.shape[0]))
+            mask = cv2.resize(mask, (original.shape[1], original.shape[0]))
+        
+        # Normalize mask to range [0, 1]
+        mask_norm = mask.astype(float) / 255
+        
+        # Add channel dimension to mask if needed
+        if len(mask_norm.shape) == 2:
+            mask_norm = np.expand_dims(mask_norm, axis=-1)
+        
+        # Blend images
+        result = original * (1 - mask_norm) + generated * mask_norm
+        return result.astype(np.uint8)
+    except Exception as e:
+        raise Exception(f"Failed to blend images: {str(e)}")
+
+@ai_bp.route('/enhance', methods=['POST', 'OPTIONS'])
+@rate_limit()
+def enhance_image():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
+    try:
+        user_id = verify_auth_token()
+        data = request.get_json()
+        
+        # Get image and settings from request
+        image_data = data.get('image')
+        settings = data.get('settings', {
+            'denoise': 10,
+            'contrast': 3,
+            'sharpness': 1,
+            'brightness': 0
+        })
+        
+        if not image_data:
+            return jsonify({
+                "success": False,
+                "error": "No image provided"
+            }), 400
+            
+        # Convert base64 to numpy array
+        img = base64_to_numpy(image_data)
+        
+        # Enhanced image processing pipeline
+        try:
+            # 1. Denoise
+            denoised = cv2.fastNlMeansDenoisingColored(
+                img, 
+                None,
+                h=settings['denoise'],
+                hColor=settings['denoise'],
+                templateWindowSize=7,
+                searchWindowSize=21
+            )
+            
+            # 2. Adjust contrast using CLAHE
+            lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(
+                clipLimit=float(settings['contrast']),
+                tileGridSize=(8,8)
+            )
+            cl = clahe.apply(l)
+            enhanced_lab = cv2.merge((cl,a,b))
+            enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+            
+            # 3. Adjust brightness
+            brightness = float(settings['brightness'])
+            if brightness != 0:
+                if brightness > 0:
+                    shadow = brightness
+                    highlight = 255
+                else:
+                    shadow = 0
+                    highlight = 255 + brightness
+                alpha = (highlight - shadow)/255
+                beta = shadow
+                enhanced = cv2.convertScaleAbs(enhanced, alpha=alpha, beta=beta)
+            
+            # 4. Sharpen
+            if settings['sharpness'] > 0:
+                kernel = np.array([
+                    [-1,-1,-1],
+                    [-1, 9,-1],
+                    [-1,-1,-1]
+                ]) * float(settings['sharpness'])
+                enhanced = cv2.filter2D(enhanced, -1, kernel)
+            
+            # Convert result to base64
+            result_base64 = numpy_to_base64(enhanced)
+            
+            return jsonify({
+                "success": True,
+                "result": result_base64
+            }), 200
+            
+        except Exception as process_error:
+            print(f"Image processing error: {str(process_error)}")
+            return jsonify({
+                "success": False,
+                "error": f"Image processing failed: {str(process_error)}"
+            }), 500
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400 
