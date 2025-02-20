@@ -139,14 +139,20 @@ def query_together(prompt, params=None):
         print(f"Starting image generation with prompt: {prompt}")
         
         default_params = {
-            "model": "stabilityai/stable-diffusion-xl-base-1.0",
+            "model": "black-forest-labs/FLUX.1-schnell-Free",
             "prompt": prompt,
-            "steps": 30,
+            "steps": 20,
             "n": 1,
             "height": 1024,
             "width": 1024,
-            "guidance": 7.5,
-            "output_format": "jpeg"
+            "guidance": 3.5,
+            "output_format": "jpeg",
+            "image_loras": [
+                {
+                    "path": "https://huggingface.co/strangerzonehf/Flux-Midjourney-Mix2-LoRA",
+                    "scale": 2
+                }
+            ]
         }
         
         if params:
