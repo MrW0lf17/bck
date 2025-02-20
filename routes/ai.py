@@ -882,10 +882,9 @@ def enhance_image():
         # Get image and settings from request
         image_data = data.get('image')
         settings = data.get('settings', {
-            'denoise': 10,
-            'contrast': 3,
-            'sharpness': 1,
-            'brightness': 0
+            'enhance_level': 'medium',  # low, medium, high
+            'style': 'natural',  # natural, vibrant, artistic
+            'focus': 'overall'  # overall, details, colors
         })
         
         if not image_data:
@@ -893,68 +892,72 @@ def enhance_image():
                 "success": False,
                 "error": "No image provided"
             }), 400
+
+        # Build the enhancement prompt based on settings
+        base_prompt = "Enhance this image with perfect exposure, optimal contrast, and natural colors."
+        style_prompts = {
+            'natural': "Maintain natural and realistic appearance while improving quality.",
+            'vibrant': "Boost colors and vibrancy while keeping the image balanced.",
+            'artistic': "Apply artistic enhancement with dramatic lighting and mood."
+        }
+        enhance_level_prompts = {
+            'low': "Apply subtle improvements.",
+            'medium': "Apply moderate enhancements for a balanced result.",
+            'high': "Apply strong enhancements for maximum impact."
+        }
+        focus_prompts = {
+            'overall': "Focus on overall image quality.",
+            'details': "Emphasize fine details and textures.",
+            'colors': "Prioritize color enhancement and balance."
+        }
+
+        enhancement_prompt = f"{base_prompt} {style_prompts[settings['style']]} {enhance_level_prompts[settings['enhance_level']]} {focus_prompts[settings['focus']]}"
             
-        # Convert base64 to numpy array
-        img = base64_to_numpy(image_data)
+        # Prepare the API request
+        payload = {
+            "model": "black-forest-labs/FLUX.1-schnell-Free",
+            "steps": 4,
+            "n": 1,
+            "height": 1024,
+            "width": 1024,
+            "guidance": 3.5,
+            "output_format": "jpeg",
+            "prompt": enhancement_prompt,
+            "image_url": image_data  # Pass the base64 image data
+        }
         
-        # Enhanced image processing pipeline
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {TOGETHER_API_TOKEN}"
+        }
+
         try:
-            # 1. Denoise
-            denoised = cv2.fastNlMeansDenoisingColored(
-                img, 
-                None,
-                h=settings['denoise'],
-                hColor=settings['denoise'],
-                templateWindowSize=7,
-                searchWindowSize=21
-            )
-            
-            # 2. Adjust contrast using CLAHE
-            lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(
-                clipLimit=float(settings['contrast']),
-                tileGridSize=(8,8)
-            )
-            cl = clahe.apply(l)
-            enhanced_lab = cv2.merge((cl,a,b))
-            enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-            
-            # 3. Adjust brightness
-            brightness = float(settings['brightness'])
-            if brightness != 0:
-                if brightness > 0:
-                    shadow = brightness
-                    highlight = 255
+            # Make the API request
+            response = requests.post(TOGETHER_API_URL, json=payload, headers=headers)
+            response_data = response.json()
+
+            if 'data' in response_data and len(response_data['data']) > 0 and 'url' in response_data['data'][0]:
+                enhanced_image_url = response_data['data'][0]['url']
+                
+                # Download the enhanced image
+                img_response = requests.get(enhanced_image_url)
+                if img_response.ok:
+                    enhanced_image_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                    return jsonify({
+                        "success": True,
+                        "result": f"data:image/jpeg;base64,{enhanced_image_base64}"
+                    }), 200
                 else:
-                    shadow = 0
-                    highlight = 255 + brightness
-                alpha = (highlight - shadow)/255
-                beta = shadow
-                enhanced = cv2.convertScaleAbs(enhanced, alpha=alpha, beta=beta)
+                    raise Exception("Failed to download enhanced image")
+            else:
+                raise Exception("Invalid response from Together API")
             
-            # 4. Sharpen
-            if settings['sharpness'] > 0:
-                kernel = np.array([
-                    [-1,-1,-1],
-                    [-1, 9,-1],
-                    [-1,-1,-1]
-                ]) * float(settings['sharpness'])
-                enhanced = cv2.filter2D(enhanced, -1, kernel)
-            
-            # Convert result to base64
-            result_base64 = numpy_to_base64(enhanced)
-            
-            return jsonify({
-                "success": True,
-                "result": result_base64
-            }), 200
-            
-        except Exception as process_error:
-            print(f"Image processing error: {str(process_error)}")
+        except Exception as api_error:
+            print(f"API error: {str(api_error)}")
             return jsonify({
                 "success": False,
-                "error": f"Image processing failed: {str(process_error)}"
+                "error": f"Enhancement failed: {str(api_error)}"
             }), 500
         
     except Exception as e:
