@@ -36,14 +36,13 @@ def create_app():
     logger.info("Starting application initialization...")
     app = Flask(__name__)
     
-    # Simple CORS configuration
+    # Configure CORS - Allow all origins temporarily for debugging
     CORS(app, resources={
         r"/*": {
-            "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
+            "origins": "*",
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": "*",
+            "allow_headers": ["Content-Type", "Authorization", "X-User-ID", "Accept", "Origin"],
             "expose_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": False,
             "max_age": 600
         }
     })
@@ -52,10 +51,9 @@ def create_app():
     @app.after_request
     def after_request(response):
         origin = request.headers.get('Origin')
-        if origin in ["https://diz-nine.vercel.app", "http://localhost:5173"]:
-            response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = '*'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-User-ID, Accept, Origin'
         response.headers['Access-Control-Max-Age'] = '600'
         return response
     
