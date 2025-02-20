@@ -617,46 +617,57 @@ def remove_background():
         # Read the input image
         input_data = file.read()
         
-        # Process image with rembg
-        output_data = remove(input_data)
-        
-        # Generate unique filename
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
-        
         try:
-            # Upload to Supabase Storage
-            storage_response = supabase.storage.from_('generated-images').upload(
-                filename,
-                output_data,
-                {
-                    'content-type': 'image/png',
-                    'cache-control': 'public, max-age=31536000'
-                }
-            )
+            # Process image with rembg
+            output_data = remove(input_data)
             
-            # Get public URL
-            public_url = supabase.storage.from_('generated-images').get_public_url(filename)
+            # Generate unique filename
+            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
             
+            try:
+                # Upload to Supabase Storage
+                storage_response = supabase.storage.from_('generated-images').upload(
+                    filename,
+                    output_data,
+                    {
+                        'content-type': 'image/png',
+                        'cache-control': 'public, max-age=31536000'
+                    }
+                )
+                
+                # Get public URL
+                public_url = supabase.storage.from_('generated-images').get_public_url(filename)
+                
+                return jsonify({
+                    "success": True,
+                    "message": "Background removed successfully",
+                    "processed_url": public_url
+                }), 200
+                
+            except Exception as storage_error:
+                print(f"Storage error: {str(storage_error)}")
+                # If storage fails, return the processed image as base64
+                image_base64 = base64.b64encode(output_data).decode('utf-8')
+                return jsonify({
+                    "success": True,
+                    "message": "Background removed but storage failed",
+                    "image_data": f"data:image/png;base64,{image_base64}"
+                }), 200
+                
+        except Exception as process_error:
+            print(f"Processing error: {str(process_error)}")
             return jsonify({
-                "success": True,
-                "message": "Background removed successfully",
-                "processed_url": public_url
-            }), 200
-            
-        except Exception as storage_error:
-            print(f"Storage error: {str(storage_error)}")
-            # If storage fails, return the processed image as base64
-            image_base64 = base64.b64encode(output_data).decode('utf-8')
-            return jsonify({
-                "success": True,
-                "message": "Background removed but storage failed",
-                "image_data": f"data:image/png;base64,{image_base64}",
-                "error_details": str(storage_error)
-            }), 200
+                "success": False,
+                "error": f"Failed to process image: {str(process_error)}"
+            }), 400
             
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        print(f"Background removal error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Error processing request: {str(e)}"
+        }), 400
 
 def process_uploaded_image(file):
     """Process uploaded image file into OpenCV format"""
