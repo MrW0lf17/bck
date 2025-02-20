@@ -16,7 +16,6 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from io import BytesIO
-from rembg import remove
 import json
 import textwrap
 import subprocess
@@ -603,100 +602,6 @@ def generate_image():
     except Exception as e:
         print(f"Error in generate endpoint: {str(e)}")
         return jsonify({"error": str(e)}), 400
-
-@ai_bp.route('/remove-background', methods=['POST', 'OPTIONS'])
-def remove_background():
-    if request.method == 'OPTIONS':
-        return '', 204
-        
-    try:
-        if 'file' not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
-            
-        # Validate file type
-        allowed_extensions = {'png', 'jpg', 'jpeg', 'webp'}
-        if '.' not in file.filename or \
-           file.filename.rsplit('.', 1)[1].lower() not in allowed_extensions:
-            return jsonify({"error": "Invalid file type. Allowed types: PNG, JPG, JPEG, WEBP"}), 400
-        
-        # Check file size (10MB limit)
-        file_content = file.read()
-        if len(file_content) > 10 * 1024 * 1024:  # 10MB in bytes
-            return jsonify({"error": "File size too large. Maximum size is 10MB"}), 400
-        
-        try:
-            # Process image with rembg
-            output_data = remove(
-                file_content,
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=240,
-                alpha_matting_background_threshold=10,
-                alpha_matting_erode_size=10
-            )
-            
-            # Generate unique filename
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-            filename = f"bg_removed_{timestamp}_{uuid.uuid4()}.png"
-            
-            try:
-                # Upload to Supabase Storage
-                storage_response = supabase.storage.from_('generated-images').upload(
-                    filename,
-                    output_data,
-                    {
-                        'content-type': 'image/png',
-                        'cache-control': 'public, max-age=31536000'
-                    }
-                )
-                
-                # Get public URL
-                public_url = supabase.storage.from_('generated-images').get_public_url(filename)
-                
-                # Verify the image is accessible
-                verify_response = requests.head(public_url, timeout=10)
-                if not verify_response.ok:
-                    raise Exception(f"Uploaded image is not accessible: {verify_response.status_code}")
-                
-                return jsonify({
-                    "success": True,
-                    "message": "Background removed successfully",
-                    "processed_url": public_url
-                }), 200
-                
-            except Exception as storage_error:
-                print(f"Storage error: {str(storage_error)}")
-                # If storage fails, return the processed image as base64
-                image_base64 = base64.b64encode(output_data).decode('utf-8')
-                return jsonify({
-                    "success": True,
-                    "message": "Background removed but storage failed",
-                    "image_data": f"data:image/png;base64,{image_base64}"
-                }), 200
-                
-        except Exception as process_error:
-            print(f"Processing error: {str(process_error)}")
-            return jsonify({
-                "success": False,
-                "error": f"Failed to process image: {str(process_error)}"
-            }), 500
-            
-    except Exception as e:
-        print(f"Error in remove-background endpoint: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 400
-
-def process_uploaded_image(file):
-    """Process uploaded image file into OpenCV format"""
-    # Read image from file stream
-    file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    return img
 
 @ai_bp.route('/text-to-video', methods=['POST', 'OPTIONS'])
 @rate_limit()
