@@ -39,12 +39,12 @@ def create_app():
     # Configure CORS
     CORS(app, 
         resources={
-            r"/api/*": {
+            r"/*": {
                 "origins": ["https://diz-nine.vercel.app", "http://localhost:5173"],
                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                 "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
                 "expose_headers": ["Content-Type"],
-                "supports_credentials": True,
+                "supports_credentials": False,
                 "max_age": 600
             }
         }
@@ -58,12 +58,9 @@ def create_app():
             response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Credentials'] = 'false'
             response.headers['Access-Control-Max-Age'] = '600'
-            
-        if request.method == 'OPTIONS':
-            return response
-            
+        
         return response
     
     # Register blueprints
