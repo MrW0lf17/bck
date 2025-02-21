@@ -925,12 +925,12 @@ def enhance_image():
         # Prepare the API request
         payload = {
             "model": "stabilityai/stable-diffusion-xl-base-1.0",
-            "prompt": "enhance this photo, same composition, improve quality",
-            "negative_prompt": "blur, pixelated, low quality, distorted, different composition",
-            "image": image_data,
-            "num_inference_steps": 20,
+            "prompt": "enhance this photo, same composition, improve quality, maintain original colors and composition",
+            "negative_prompt": "blur, pixelated, low quality, distorted, different composition, different colors",
+            "input_image": image_data,
+            "num_inference_steps": 30,
             "guidance_scale": 7.5,
-            "strength": 0.3,  # Lower strength to maintain more of original image
+            "strength": 0.3
         }
         
         headers = {
@@ -942,10 +942,10 @@ def enhance_image():
         try:
             print("Making API request to Together.xyz...")
             response = requests.post(
-                "https://api.together.xyz/v1/images/stable-diffusion/img2img",
+                "https://api.together.xyz/inference/stabilityai/stable-diffusion-xl-base-1.0/img2img",
                 json=payload,
                 headers=headers,
-                timeout=30
+                timeout=60  # Increased timeout for image processing
             )
             
             print(f"API Response Status: {response.status_code}")
