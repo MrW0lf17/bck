@@ -52,25 +52,31 @@ TOGETHER_API_TOKEN = TOGETHER_API_TOKEN.strip()
 TOGETHER_API_URL = "https://api.together.xyz/v1/images/generations"
 
 # Rate limiting configuration
-RATE_LIMIT = 10  # requests per minute
+RATE_LIMIT_ANONYMOUS = 5  # requests per minute for anonymous users
+RATE_LIMIT_AUTHENTICATED = 20  # requests per minute for authenticated users
 rate_limit_dict = {}
 
 def rate_limit():
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
-            # Get user identifier (IP address or user ID)
-            user_id = request.headers.get('X-User-ID') or request.remote_addr
+            # Get user identifier
+            auth_header = request.headers.get('Authorization')
+            is_authenticated = bool(auth_header and auth_header.startswith('Bearer '))
+            user_id = verify_auth_token() if is_authenticated else request.remote_addr
+            
+            # Get appropriate rate limit
+            limit = RATE_LIMIT_AUTHENTICATED if is_authenticated else RATE_LIMIT_ANONYMOUS
             
             # Check rate limit
             now = time.time()
             user_requests = rate_limit_dict.get(user_id, [])
             user_requests = [req for req in user_requests if req > now - 60]  # Keep only last minute
             
-            if len(user_requests) >= RATE_LIMIT:
+            if len(user_requests) >= limit:
                 return jsonify({
                     "success": False,
-                    "error": "Rate limit exceeded. Please try again later."
+                    "error": f"Rate limit exceeded. Please wait a minute and try again. Limit: {limit} requests per minute."
                 }), 429
             
             rate_limit_dict[user_id] = user_requests + [now]
@@ -420,11 +426,19 @@ def generate_image():
         return '', 204
         
     try:
+        # Log request details
+        print("New image generation request received")
+        print(f"Headers: {dict(request.headers)}")
+        
         user_id = verify_auth_token()
+        print(f"Authenticated user_id: {user_id}")
+        
         data = request.get_json()
         prompt = data.get('prompt')
+        print(f"Received prompt: {prompt}")
         
         if not prompt:
+            print("Error: No prompt provided")
             return jsonify({
                 "success": False,
                 "error": "No prompt provided"
@@ -435,18 +449,26 @@ def generate_image():
             try:
                 detected_lang = detect(prompt)
                 print(f"Detected language: {detected_lang}")
-            except:
+            except Exception as lang_error:
                 detected_lang = "en"
-                print("Language detection failed, defaulting to English")
+                print(f"Language detection failed: {str(lang_error)}, defaulting to English")
+            
+            # Log Together API token status (masked)
+            token_status = "Present" if TOGETHER_API_TOKEN else "Missing"
+            print(f"Together API token status: {token_status}")
             
             # Generate image using Together.xyz
+            print("Calling Together API for image generation...")
             image_base64 = query_together(prompt)
             
             if not image_base64:
+                print("Error: No image data received from Together API")
                 return jsonify({
                     "success": False,
                     "error": "Failed to generate image"
                 }), 500
+            
+            print("Successfully received image data from Together API")
             
             try:
                 # Convert base64 to bytes
